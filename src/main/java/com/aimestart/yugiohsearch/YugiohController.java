@@ -2,6 +2,7 @@ package com.aimestart.yugiohsearch;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
+
 @RestController
 @RequestMapping("/yugioh")
 
@@ -36,6 +37,11 @@ public class YugiohController {
     }
     @PutMapping("/card/update")
     public void updatingCards(){
+        yugiohService.updateExistingCardsWeight();
+    }
+
+    @PutMapping("/card/update/database")
+    public void updatingExistingCards(){
         yugiohService.updateExistingCards();
     }
 }

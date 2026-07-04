@@ -6,6 +6,10 @@ import org.springframework.web.client.RestClient;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
+import java.util.Map;
+import java.util.Objects;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 
 @Service
@@ -16,7 +20,8 @@ public class YugiohService {
 
     public record CardInfoResponse(List<CardData> data) {}
 
-    public record CardData(String name, String desc, String type) {}
+    public record CardData(String name, String desc, String type, Integer atk, Integer def, Integer level,
+                           String race, String attribute, Integer linkval, String archetype, String [] linkmarkers, String Staple, Integer scale) {}
 
     public YugiohService(RestClient.Builder builder, CardRepository cardRepository) {
         this.restClient = builder.baseUrl("https://db.ygoprodeck.com/api/v7").build();
@@ -48,7 +53,7 @@ public class YugiohService {
         return cardRepository.saveAll(cardsToSave);
     }
 
-    public void updateExistingCards() {
+    public void updateExistingCardsWeight() {
         List<Card> cards = cardRepository.findAll();
         List<CardData> apiCards = fetchallCards();
         for (Card card : cards) {
@@ -90,6 +95,63 @@ public class YugiohService {
                     cardRepository.save(card);
                 }
             }
+        }
+    }
+
+    public void updateExistingCards() {
+        List<Card> cards = cardRepository.findAll();
+        Map<String, CardData> apiCards = fetchallCards().stream()
+                .collect(Collectors.toMap(CardData::name, Function.identity()));
+
+       for (Card card : cards) {
+           if(card.isStaple() == null){
+               card.setStaple(true);
+               cardRepository.save(card);
+           }
+           /* CardData apiCard = apiCards.get(card.getName());
+
+            if (apiCard == null) {
+                continue;
+            }
+                if("yes".equalsIgnoreCase(apiCard.Staple())) {
+                    card.setStaple(true);
+                } else {
+                    card.setStaple(false);
+                }
+
+                if(card.getType().contains("Pendulum")){
+                    card.setScale(apiCard.scale());
+                    cardRepository.save(card);
+                }
+                if(card.getType().contains("Link") && card.getType().contains("Monster")){
+                    card.setLinkvalue(apiCard.linkval());
+                    card.setLinkmarkers(List.of(apiCard.linkmarkers()));
+                    if(apiCard.archetype() != null) {
+                        card.setArchetype(apiCard.archetype());
+                    }
+                    cardRepository.save(card);
+                    continue;
+                }
+                if(card.getType().contains("Monster")){
+                    card.setAtk(apiCard.atk());
+                    card.setDef(apiCard.def());
+                    card.setLevel(apiCard.level());
+                    card.setRace(apiCard.race());
+                    card.setAttribute(apiCard.attribute());
+                    if(apiCard.archetype() != null) {
+                        card.setArchetype(apiCard.archetype());
+                    }
+                    cardRepository.save(card);
+                    continue;
+                }
+                if(card.getType().contains("Spell") || card.getType().contains("Trap")) {
+                    card.setRace(apiCard.race());
+                    if (apiCard.archetype() != null) {
+                        card.setArchetype(apiCard.archetype());
+                    }
+                    cardRepository.save(card);
+                }
+*/
         }
     }
 
