@@ -5,6 +5,7 @@ import org.springframework.web.client.RestClient;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Function;
@@ -200,26 +201,14 @@ public class YugiohService {
         return cards;
     }
 
-    public List<Card> getRelatedCards(Card focusedcard) {
-        List<Card> cards = new ArrayList<>();
-        List<String> mentionednames = new ArrayList<>();
-        String tempcarddesc = focusedcard.getDescription().toLowerCase();
-        boolean loop = true;
-        if (tempcarddesc.contains("(this card is always treated as")) {
-            tempcarddesc = tempcarddesc.substring(tempcarddesc.indexOf(")") + 1);
+    public String ifExtender(Card focusedcard) {
+        String desc = focusedcard.getDescription().toLowerCase();
+        if (Pattern.compile("summon\\s+\\d+").matcher(desc).find()) {
+            return "summon extender";
         }
-        while (loop) {
-            if (tempcarddesc.contains("\"")) {
-                if (tempcarddesc.indexOf("\"") + 1 == tempcarddesc.indexOf(focusedcard.getName().toLowerCase())) {
-                    tempcarddesc = tempcarddesc.substring(tempcarddesc.substring(tempcarddesc.indexOf("\"") + 1).indexOf("\""));
-                } else {
-                   // mentionednames.add(tempcarddesc.substring(tempcarddesc.indexOf("\"") + 1, tempcarddesc.substring(tempcarddesc.substring(tempcarddesc.substring(tempcarddesc.indexOf("\"") + 1)))));
-                }
-            } else {
-                loop = false;
-            }
+        if (Pattern.compile("add\\s+\\d+").matcher(desc).find()) {
+            return "add extender";
         }
-        return cards;
+        return "not an extender";
     }
-
 }
