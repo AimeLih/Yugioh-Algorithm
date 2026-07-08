@@ -1,0 +1,509 @@
+/* ── Base ───────────────────────────────────────────── */
+* { box-sizing: border-box; }
+
+body { background: #060a12; }
+
+/* ── Layout ─────────────────────────────────────────── */
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background:
+          radial-gradient(circle at 20% 0%, rgba(31, 97, 168, 0.08), transparent 45%),
+          radial-gradient(circle at 80% 100%, rgba(201, 162, 39, 0.05), transparent 45%),
+          #060a12;
+}
+
+/* ── Header ─────────────────────────────────────────── */
+.app-header {
+  background: linear-gradient(135deg, #0d1b2a 0%, #1a0a00 100%);
+  border-bottom: 2px solid transparent;
+  border-image: linear-gradient(90deg, transparent, #c9a227 25%, #e0b830 50%, #c9a227 75%, transparent) 1;
+  padding: 1.6rem 2rem;
+  text-align: center;
+  box-shadow: 0 4px 32px rgba(201, 162, 39, 0.18);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.header-title {
+  font-family: 'Cinzel', serif;
+  font-size: 2rem;
+  color: #f0e6d2;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  text-shadow: 0 0 18px rgba(201, 162, 39, 0.25);
+}
+
+.title-accent {
+  background: linear-gradient(135deg, #e0b830, #c9a227 50%, #8b6b10);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ── Main ───────────────────────────────────────────── */
+.app-main {
+  flex: 1;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 2.25rem 1.5rem 4rem;
+  width: 100%;
+}
+
+/* ── Search Form ────────────────────────────────────── */
+.search-form { margin-bottom: 2.25rem; }
+
+.search-row {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 0.85rem;
+}
+
+.search-input {
+  flex: 1;
+  padding: 0.9rem 1.25rem;
+  background: #10141f;
+  border: 1px solid #262c3d;
+  border-radius: 8px;
+  color: #e8dfc9;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 1.1rem;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.search-input:focus {
+  border-color: #c9a227;
+  background: #131826;
+  box-shadow: 0 0 0 3px rgba(201, 162, 39, 0.15);
+}
+
+.search-input::placeholder { color: #4a5065; }
+
+.search-btn {
+  padding: 0.9rem 2.1rem;
+  background: linear-gradient(135deg, #c9a227, #e8bf3e);
+  border: none;
+  border-radius: 8px;
+  color: #0b0e16;
+  font-family: 'Cinzel', serif;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  cursor: pointer;
+  transition: filter 0.2s, transform 0.12s, box-shadow 0.2s;
+  white-space: nowrap;
+  box-shadow: 0 4px 16px rgba(201, 162, 39, 0.28);
+}
+
+.search-btn:hover:not(:disabled) { filter: brightness(1.08); box-shadow: 0 6px 20px rgba(201, 162, 39, 0.4); }
+.search-btn:active:not(:disabled) { transform: scale(0.97); }
+.search-btn:disabled { opacity: 0.4; cursor: default; box-shadow: none; }
+
+/* ── Mode Pills ─────────────────────────────────────── */
+.search-modes { display: flex; gap: 0.6rem; }
+
+.mode-pill {
+  padding: 0.4rem 1.1rem;
+  border: 1px solid #262c3d;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 0.86rem;
+  font-family: 'Rajdhani', sans-serif;
+  font-weight: 600;
+  color: #6b7285;
+  background: rgba(255,255,255,0.015);
+  transition: all 0.18s;
+  user-select: none;
+  letter-spacing: 0.5px;
+}
+
+.mode-pill:hover { border-color: #c9a22770; color: #d8b94f; }
+
+.mode-pill.active {
+  border-color: #c9a227;
+  color: #f0d878;
+  background: rgba(201, 162, 39, 0.1);
+  box-shadow: 0 0 0 1px rgba(201, 162, 39, 0.15) inset;
+}
+
+/* ── Error ──────────────────────────────────────────── */
+.error-msg {
+  background: rgba(180, 30, 30, 0.12);
+  border: 1px solid #7a2030;
+  border-radius: 8px;
+  padding: 0.85rem 1.25rem;
+  color: #ff9494;
+  margin-bottom: 1.25rem;
+  font-size: 0.95rem;
+  font-family: 'Rajdhani', sans-serif;
+}
+
+/* ── Loading spinner ────────────────────────────────── */
+.loading { display: flex; justify-content: center; padding: 3.5rem; }
+
+.spinner {
+  width: 38px;
+  height: 38px;
+  border: 3px solid #1a2235;
+  border-top-color: #c9a227;
+  border-right-color: #e8bf3e;
+  border-radius: 50%;
+  animation: spin 0.7s cubic-bezier(0.5, 0.1, 0.5, 0.9) infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Results Layout ─────────────────────────────────── */
+.results-layout {
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
+  animation: fadeUp 0.35s ease both;
+}
+
+/* ── Card List Panel ────────────────────────────────── */
+.card-list-panel { width: 270px; flex-shrink: 0; }
+
+.panel-label {
+  color: #6b7285;
+  font-size: 0.78rem;
+  margin-bottom: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 1.8px;
+  font-family: 'Rajdhani', sans-serif;
+  font-weight: 600;
+}
+
+.card-list-item {
+  background: #10141f;
+  border: 1px solid #1c2233;
+  border-left: 3px solid;
+  border-radius: 6px;
+  padding: 0.7rem 1rem;
+  margin-bottom: 0.4rem;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.12s, box-shadow 0.15s;
+}
+
+.card-list-item:hover {
+  background: #161c2c;
+  transform: translateX(4px);
+  box-shadow: -2px 0 12px rgba(201, 162, 39, 0.08);
+}
+
+.card-list-item.selected {
+  background: #1a2138;
+  box-shadow: -2px 0 16px rgba(201, 162, 39, 0.15);
+}
+
+.card-list-name {
+  font-size: 0.94rem;
+  color: #e8dfc9;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: 'Rajdhani', sans-serif;
+}
+
+.card-list-type {
+  font-size: 0.76rem;
+  margin-top: 0.2rem;
+  opacity: 0.8;
+  font-family: 'Rajdhani', sans-serif;
+  letter-spacing: 0.3px;
+}
+
+
+.card-detail-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+  position: sticky;
+  top: 1.5rem;
+  align-self: flex-start;
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
+}
+
+/* ══════════════════════════════════════════════════════
+   WIKI-STYLE CARD (matches reference layout)
+   ══════════════════════════════════════════════════════ */
+
+.wiki-card {
+  width: 100%;
+  max-width: 960px;
+  background: #0b1420;
+  border: 1px solid #1c3350;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255,255,255,0.03) inset;
+  animation: fadeUp 0.3s ease both;
+}
+
+/* Banner with card name */
+.wiki-banner {
+  padding: 1.1rem 1.5rem;
+  text-align: center;
+  position: relative;
+}
+
+.wiki-banner::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255,255,255,0.1), transparent 65%);
+  pointer-events: none;
+}
+
+.wiki-name {
+  font-family: 'Cinzel', serif;
+  font-size: 1.4rem;
+  color: #fff;
+  text-shadow: 1px 1px 8px rgba(0, 0, 0, 0.6);
+  letter-spacing: 0.5px;
+}
+
+/* Body: image col + info col */
+.wiki-body {
+  display: flex;
+  gap: 0;
+}
+
+.wiki-image-col {
+  width: 260px;
+  flex-shrink: 0;
+  padding: 1.25rem;
+  background: #0a111c;
+  border-right: 1px solid #1c3350;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.wiki-image-frame {
+  width: 100%;
+  aspect-ratio: 68 / 99;
+  border: 2px solid;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  background: #05070c;
+}
+
+.wiki-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.4s ease;
+}
+
+.wiki-image-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background:
+    radial-gradient(circle at top, rgba(201, 162, 39, 0.08), transparent 60%),
+    #05070c;
+  color: #75819b;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 0.95rem;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  text-align: center;
+}
+
+.wiki-image-frame:hover .wiki-image { transform: scale(1.04); }
+
+.wiki-info-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Info rows table */
+.wiki-info-panel { border-bottom: 1px solid #1c3350; }
+
+.wiki-row {
+  display: flex;
+  align-items: stretch;
+  border-top: 1px solid #16273d;
+}
+
+.wiki-row:first-child { border-top: none; }
+
+.wiki-row-label {
+  width: 150px;
+  flex-shrink: 0;
+  padding: 0.65rem 1rem;
+  background: #10233d;
+  color: #8fb8e0;
+  font-family: 'Rajdhani', sans-serif;
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 0.4px;
+  display: flex;
+  align-items: center;
+  border-right: 1px solid #1c3350;
+}
+
+.wiki-row-value {
+  flex: 1;
+  padding: 0.65rem 1.1rem;
+  background: #0d1a2c;
+  color: #dbe6f2;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 0.92rem;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.wiki-badges { gap: 0.45rem; }
+
+/* Card Text section */
+.wiki-section-header {
+  padding: 0.6rem 1.1rem;
+  color: #fff;
+  font-family: 'Rajdhani', sans-serif;
+  font-weight: 700;
+  font-size: 0.88rem;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.wiki-card-text {
+  flex: 1;
+  padding: 1.1rem 1.25rem;
+  background: #0a111c;
+  color: #c2cddb;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 0.95rem;
+  line-height: 1.7;
+  white-space: pre-line;
+}
+
+.wiki-combo-panel {
+  padding: 0;
+  background: #0a111c;
+}
+
+.wiki-combo-loading,
+.wiki-combo-empty {
+  padding: 1.1rem 1.25rem;
+  color: #91a0b8;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 0.94rem;
+  line-height: 1.6;
+}
+
+/* Combo List */
+.combo-list {
+  list-style: none;
+  padding: 1.1rem 1.25rem;
+  margin: 0;
+  background: #0a111c;
+  color: #c2cddb;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 0.9rem; /* Slightly smaller font size */
+  line-height: 1.6;
+}
+
+.combo-list li {
+  margin-bottom: 0.5rem;
+  padding-left: 1.2em;
+  position: relative;
+}
+
+.combo-list li:last-child {
+  margin-bottom: 0;
+}
+
+.combo-list li::before {
+  content: '✦'; /* A decorative bullet point */
+  color: #e0b830;
+  position: absolute;
+  left: 0;
+  font-size: 0.8em;
+  top: 0.2em;
+}
+
+
+/* ── Badges ─────────────────────────────────────────── */
+.badge {
+  display: inline-block;
+  padding: 0.28rem 0.8rem;
+  border-radius: 20px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  font-family: 'Rajdhani', sans-serif;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255,255,255,0.08) inset;
+}
+
+/* ── Stars (level) ──────────────────────────────────── */
+.level-stars {
+  color: #e8bf3e;
+  font-size: 0.95rem;
+  letter-spacing: 1.5px;
+  text-shadow: 0 0 8px rgba(201, 162, 39, 0.4);
+}
+
+/* ── Empty state ────────────────────────────────────── */
+.empty-state {
+  text-align: center;
+  padding: 4.5rem 2rem;
+  color: #3d4256;
+  animation: fadeUp 0.3s ease both;
+}
+
+.empty-state-icon {
+  font-size: 3.75rem;
+  margin-bottom: 1.1rem;
+  opacity: 0.35;
+  color: #c9a227;
+  text-shadow: 0 0 24px rgba(201, 162, 39, 0.3);
+}
+
+.empty-state p {
+  font-size: 1rem;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  font-family: 'Rajdhani', sans-serif;
+  font-weight: 600;
+}
+
+/* ── Scrollbar polish (webkit) ───────────────────────── */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: #0a0d15; }
+::-webkit-scrollbar-thumb { background: #262c3d; border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: #3a4055; }
+
+/* ── Responsive ─────────────────────────────────────── */
+@media (max-width: 700px) {
+  .results-layout { flex-direction: column; }
+  .card-list-panel { width: 100%; }
+  .header-title { font-size: 1.35rem; letter-spacing: 1.8px; }
+  .app-main { padding: 1.25rem 1rem 3rem; }
+  .search-btn { padding: 0.85rem 1.25rem; }
+  .wiki-body { flex-direction: column; }
+  .wiki-image-col { width: 100%; border-right: none; border-bottom: 1px solid #1c3350; }
+  .wiki-image-frame { max-width: 220px; margin: 0 auto; }
+  .wiki-row-label { width: 110px; font-size: 0.78rem; }
+}

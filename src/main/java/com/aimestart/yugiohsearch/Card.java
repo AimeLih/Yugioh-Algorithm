@@ -51,13 +51,16 @@ public class Card {
     @Column()
     private Integer linkvalue;
 
-
-
     @Column(name = "LinkMarkers", columnDefinition = "text[]")
     private List<String> linkmarkers = new ArrayList<>();
 
     @Column()
     private Boolean staple;
+
+    @Column(name = "card_image_url", columnDefinition = "TEXT")
+    private String cardImageUrl;
+
+
 
 
 
@@ -108,7 +111,7 @@ public class Card {
         this.type = type;
     }
 
-    public int getLevel() {
+    public Integer getLevel() {
         return level;
     }
 
@@ -116,7 +119,7 @@ public class Card {
         this.level = level;
     }
 
-    public int getAtk() {
+    public Integer getAtk() {
         return atk;
     }
 
@@ -124,7 +127,7 @@ public class Card {
         this.atk = atk;
     }
 
-    public int getDef() {
+    public Integer getDef() {
         return def;
     }
 
@@ -156,7 +159,7 @@ public class Card {
         this.archetype = archetype;
     }
 
-    public int getScale() {
+    public Integer getScale() {
         return scale;
     }
 
@@ -164,7 +167,7 @@ public class Card {
         this.scale = scale;
     }
 
-    public int getLinkvalue() {
+    public Integer getLinkvalue() {
         return linkvalue;
     }
 
@@ -186,5 +189,13 @@ public class Card {
 
     public void setStaple(Boolean staple) {
         this.staple = staple;
+    }
+
+    public String getCardImageUrl() {
+        return cardImageUrl;
+    }
+
+    public void setCardImageUrl(String cardImageUrl) {
+        this.cardImageUrl = cardImageUrl;
     }
 }
