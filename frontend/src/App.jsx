@@ -193,7 +193,7 @@ function CardListItem({ card, selected, onClick }) {
   )
 }
 
-const API = 'http://localhost:8080'
+const API = import.meta.env.VITE_API_URL
 
 export default function App() {
   const comboRequestId = useRef(0)
