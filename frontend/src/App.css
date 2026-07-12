@@ -227,11 +227,7 @@ body { background: #060a12; }
   min-width: 0;
   display: flex;
   justify-content: center;
-  position: sticky;
-  top: 1.5rem;
   align-self: flex-start;
-  max-height: calc(100vh - 3rem);
-  overflow-y: auto;
 }
 
 /* ══════════════════════════════════════════════════════
@@ -402,6 +398,106 @@ body { background: #060a12; }
   background: #0a111c;
 }
 
+.combo-builder-top {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 0.9rem 1.1rem 0.6rem;
+  border-bottom: 1px solid #16273d;
+}
+
+.combo-path {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.6rem;
+  min-width: 0;
+  align-items: center;
+  overflow-x: auto;
+  padding-bottom: 0.1rem;
+}
+
+.combo-path-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex: 0 0 auto;
+}
+
+.combo-path-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 999px;
+  background: #10233d;
+  border: 1px solid #1c3350;
+  color: #dbe6f2;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 0.82rem;
+  line-height: 1;
+}
+
+.combo-path-chip.active {
+  border-color: #c9a227;
+  background: #142b4a;
+  box-shadow:
+    0 0 0 1px rgba(201, 162, 39, 0.18) inset,
+    0 0 20px rgba(201, 162, 39, 0.16);
+}
+
+.combo-path-arrow {
+  color: #e0b830;
+  font-family: 'Cinzel', serif;
+  font-size: 0.95rem;
+  opacity: 0.9;
+  flex: 0 0 auto;
+}
+
+.combo-path-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 999px;
+  background: rgba(201, 162, 39, 0.18);
+  color: #f0d878;
+  font-size: 0.72rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.combo-path-name {
+  white-space: nowrap;
+}
+
+.combo-back-btn {
+  padding: 0.45rem 0.8rem;
+  border: 1px solid #2a3b57;
+  border-radius: 8px;
+  background: #10141f;
+  color: #dbe6f2;
+  font-family: 'Rajdhani', sans-serif;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.12s, border-color 0.18s, background 0.18s;
+}
+
+.combo-back-btn:hover:not(:disabled) {
+  border-color: #c9a227;
+  background: #162238;
+}
+
+.combo-back-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.combo-back-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 .wiki-combo-loading,
 .wiki-combo-empty {
   padding: 1.1rem 1.25rem;
@@ -409,6 +505,72 @@ body { background: #060a12; }
   font-family: 'Rajdhani', sans-serif;
   font-size: 0.94rem;
   line-height: 1.6;
+}
+
+.combo-option-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+  padding: 1rem 1.1rem 1.15rem;
+}
+
+.combo-option-card {
+  text-align: left;
+  border: 1px solid #1c3350;
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.02), transparent 45%),
+    #0d1a2c;
+  color: #dbe6f2;
+  padding: 0.95rem 1rem;
+  cursor: pointer;
+  transition: transform 0.14s, border-color 0.18s, box-shadow 0.18s, background 0.18s;
+}
+
+.combo-option-card:hover {
+  border-color: #c9a227;
+  box-shadow: 0 8px 24px rgba(201, 162, 39, 0.12);
+  transform: translateY(-2px);
+}
+
+.combo-option-label {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin-bottom: 0.55rem;
+  padding: 0.22rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(201, 162, 39, 0.12);
+  border: 1px solid rgba(201, 162, 39, 0.2);
+  color: #f0d878;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.combo-option-name {
+  font-family: 'Cinzel', serif;
+  font-size: 0.95rem;
+  color: #f0e6d2;
+  margin-bottom: 0.35rem;
+}
+
+.combo-option-type {
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 0.8rem;
+  color: #8fb8e0;
+  margin-bottom: 0.45rem;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.combo-option-reason {
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 0.86rem;
+  color: #c2cddb;
+  line-height: 1.45;
 }
 
 /* Combo List */
@@ -506,4 +668,8 @@ body { background: #060a12; }
   .wiki-image-col { width: 100%; border-right: none; border-bottom: 1px solid #1c3350; }
   .wiki-image-frame { max-width: 220px; margin: 0 auto; }
   .wiki-row-label { width: 110px; font-size: 0.78rem; }
+  .combo-builder-top { flex-direction: column; }
+  .combo-back-btn { width: 100%; }
+  .combo-path { padding-bottom: 0.25rem; }
+  .combo-option-grid { grid-template-columns: 1fr; }
 }

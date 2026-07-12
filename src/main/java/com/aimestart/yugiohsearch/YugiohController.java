@@ -29,7 +29,7 @@ public class YugiohController {
         return yugiohService.getCardByName(name);
     }
     @GetMapping("/card/combos")
-    public List<String> getPossibleCombos(@RequestParam String name) {
+    public List<YugiohService.ComboOption> getPossibleCombos(@RequestParam String name) {
         return yugiohService.getPossibleCombos(name);
     }
     @GetMapping("/card/substring")

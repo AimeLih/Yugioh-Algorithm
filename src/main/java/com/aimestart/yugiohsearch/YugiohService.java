@@ -25,6 +25,17 @@ public class YugiohService {
     ) {}
     public record CardData(String name, String desc, String type, Integer atk, Integer def, Integer level,
                            String race, String attribute, Integer linkval, String archetype, String [] linkmarkers, String staple, Integer scale, @JsonProperty("card_images") List<CardImage> cardImages) {}
+    public record ComboOption(Card card, String reason, int score, String label) {}
+
+    private static class ComboDraft {
+        private final Card card;
+        private int score;
+        private final LinkedHashSet<String> reasons = new LinkedHashSet<>();
+
+        private ComboDraft(Card card) {
+            this.card = card;
+        }
+    }
 
     public YugiohService(RestClient.Builder builder, CardRepository cardRepository) {
         this.restClient = builder.baseUrl("https://db.ygoprodeck.com/api/v7").build();
@@ -206,26 +217,34 @@ public class YugiohService {
       return cardRepository.findAll();
     }
 
-    public List<String> getPossibleCombos(String cardName) {
+    public List<ComboOption> getPossibleCombos(String cardName) {
         Card card = cardRepository.getCardByName(cardName);
         if (card == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Card not found: " + cardName);
         }
 
-        List<String> combos = new ArrayList<>();
-        String description = safeLower(card.getDescription());
-        List<Card> relatedCards = getRelatedArchetypeCards(card);
-
-        combos.addAll(buildExplicitComboRoutes(card, description, relatedCards));
-        combos.addAll(buildArchetypeComboRoutes(card, relatedCards));
-        combos.addAll(buildTextureComboRoutes(card, description, relatedCards));
-
-        List<String> deduped = new ArrayList<>(new LinkedHashSet<>(combos));
-        if (deduped.isEmpty()) {
-            deduped.add("No specific combo routes identified for this card yet.");
+        List<ComboOption> fusionTargets = buildFusionSummonTargets(card);
+        List<ComboOption> curated = buildCuratedGuideCombos(card);
+        if (!curated.isEmpty()) {
+            return mergeComboOptions(fusionTargets, curated);
         }
 
-        return deduped;
+        String description = safeLower(card.getDescription());
+        Map<String, ComboDraft> drafts = new LinkedHashMap<>();
+
+        buildExplicitComboRoutes(card, description, drafts);
+        buildTextDrivenComboRoutes(card, description, drafts);
+
+        List<ComboOption> options = drafts.values().stream()
+                .filter(draft -> draft.score > 0)
+                .sorted(Comparator
+                        .comparingInt((ComboDraft draft) -> draft.score).reversed()
+                        .thenComparing(draft -> draft.card.getName(), String.CASE_INSENSITIVE_ORDER))
+                .limit(5)
+                .map(draft -> new ComboOption(draft.card, joinReasons(draft.reasons), draft.score, comboLabelFor(draft.card)))
+                .collect(Collectors.toList());
+
+        return mergeComboOptions(fusionTargets, options);
     }
 
     public Card getCardByName(String name) {
@@ -293,8 +312,39 @@ public class YugiohService {
                 .collect(Collectors.toList());
     }
 
-    private List<String> buildExplicitComboRoutes(Card card, String description, List<Card> relatedCards) {
-        List<String> routes = new ArrayList<>();
+    private List<ComboOption> buildFusionSummonTargets(Card card) {
+        String description = safeLower(card.getDescription());
+        if (!description.contains("fusion summon")) {
+            return Collections.emptyList();
+        }
+
+        return getRelatedArchetypeCards(card).stream()
+                .filter(this::isFusionMonster)
+                .sorted(Comparator
+                        .comparingInt(Card::getWeight).reversed()
+                        .thenComparing(Card::getName, String.CASE_INSENSITIVE_ORDER))
+                .map(target -> new ComboOption(
+                        target,
+                        card.getName() + " can Fusion Summon this in-archetype Fusion Monster when its material requirements are met",
+                        200,
+                        "fusion target"))
+                .collect(Collectors.toList());
+    }
+
+    private List<ComboOption> mergeComboOptions(List<ComboOption> priorityOptions, List<ComboOption> otherOptions) {
+        LinkedHashMap<String, ComboOption> merged = new LinkedHashMap<>();
+        for (ComboOption option : priorityOptions) {
+            merged.put(safeLower(option.card().getName()), option);
+        }
+        for (ComboOption option : otherOptions) {
+            merged.putIfAbsent(safeLower(option.card().getName()), option);
+        }
+        return merged.values().stream().limit(5).collect(Collectors.toList());
+    }
+
+    private void buildExplicitComboRoutes(Card card, String description, Map<String, ComboDraft> drafts) {
+        List<Card> relatedCards = getRelatedArchetypeCards(card);
+        String archetype = safeLower(card.getArchetype());
 
         List<String> quotedCards = extractQuotedTerms(card.getDescription());
         for (String quoted : quotedCards) {
@@ -302,21 +352,22 @@ public class YugiohService {
             if (matchedCard == null || Objects.equals(matchedCard.getId(), card.getId())) {
                 continue;
             }
-
-            if (description.contains("fusion summon") && description.contains(safeLower(matchedCard.getName()))) {
-                routes.add(matchedCard.getName() + " + 1 LIGHT monster -> Fusion Summon " + card.getName() + ".");
+            if (!sameArchetype(archetype, matchedCard)) {
                 continue;
             }
 
-            if (description.contains("add to your hand") || description.contains("set 1")) {
-                routes.add(card.getName() + " -> use " + matchedCard.getName() + " as the follow-up search or set target.");
-                continue;
-            }
+            ComboDraft draft = draftFor(drafts, matchedCard);
+            addScore(draft, 100, "Effect text directly names this card");
 
-            routes.add(matchedCard.getName() + " -> pairs with " + card.getName() + " for the text line on this card.");
+            if (description.contains("fusion summon")) {
+                addScore(draft, 20, "It appears in a Fusion Summon line");
+            }
+            if (description.contains("add to your hand") || description.contains("set 1") || description.contains("search")) {
+                addScore(draft, 15, "It is a follow-up target from the card text");
+            }
         }
 
-        if (description.contains("fusion summon")) {
+        if (description.contains("fusion summon") && description.contains("branded")) {
             Card brandedSpellTrap = relatedCards.stream()
                     .filter(this::isSpellOrTrap)
                     .filter(c -> safeLower(c.getName()).contains("branded"))
@@ -324,88 +375,69 @@ public class YugiohService {
                     .orElse(null);
 
             if (brandedSpellTrap != null && (description.contains("add to your hand") || description.contains("set 1"))) {
-                routes.add(card.getName() + " in GY -> add or set " + brandedSpellTrap.getName() + " for the next turn.");
+                ComboDraft draft = draftFor(drafts, brandedSpellTrap);
+                addScore(draft, 35, "It is a branded follow-up spell or trap");
+                draft.reasons.add(card.getName() + " can recycle or set it for follow-up");
             }
         }
-
-        return routes;
     }
 
-    private List<String> buildArchetypeComboRoutes(Card card, List<Card> relatedCards) {
-        List<String> routes = new ArrayList<>();
-        if (relatedCards.isEmpty()) {
-            return routes;
+    private void buildTextDrivenComboRoutes(Card card, String description, Map<String, ComboDraft> drafts) {
+        List<Card> candidates = getRelatedArchetypeCards(card);
+
+        if (candidates.isEmpty()) {
+            return;
         }
 
-        List<Card> starters = relatedCards.stream().filter(this::isStarterCard).limit(2).collect(Collectors.toList());
-        List<Card> extenders = relatedCards.stream().filter(this::isExtenderCard).limit(2).collect(Collectors.toList());
-        List<Card> payoffCards = relatedCards.stream().filter(this::isPayoffCard).limit(2).collect(Collectors.toList());
-        List<Card> followUps = relatedCards.stream().filter(this::isFollowUpCard).limit(2).collect(Collectors.toList());
-        List<Card> spellTrapSupport = relatedCards.stream().filter(this::isSpellOrTrap).limit(3).collect(Collectors.toList());
+        boolean sourceCanSearch = containsAny(description, "search", "add to your hand", "add 1", "reveal 1", "draw 1");
+        boolean sourceCanSummon = containsAny(description, "special summon", "normal summon", "tribute summon");
+        boolean sourceCanRecover = containsAny(description, "send to the graveyard", "discard", "banish", "graveyard", "recycle");
+        boolean sourceCanSetBackrow = containsAny(description, "set 1", "set it", "set this", "place 1");
 
-        if (!starters.isEmpty()) {
-            Card starter = starters.get(0);
-            routes.add(starter.getName() + " -> accesses " + card.getName() + " to start the " + archetypeLabel(card) + " engine.");
-        }
+        for (Card candidate : candidates) {
+            String targetDescription = safeLower(candidate.getDescription());
+            int score = 0;
+            LinkedHashSet<String> reasons = new LinkedHashSet<>();
 
-        if (!extenders.isEmpty()) {
-            Card extender = extenders.get(0);
-            String payoff = !payoffCards.isEmpty() ? payoffCards.get(0).getName() : card.getName();
-            routes.add(extender.getName() + " -> extends into " + card.getName() + " and converts into " + payoff + ".");
-        }
+            if (sourceCanSearch && isSearchBridgeTarget(candidate, targetDescription)) {
+                score += 70;
+                reasons.add("Source text can search or add this card");
+                if (isSelfSummoningBridgeTarget(candidate, targetDescription)) {
+                    reasons.add("This card can special summon itself after being searched");
+                    score += 15;
+                }
+            }
 
-        if (!spellTrapSupport.isEmpty() && (safeLower(card.getDescription()).contains("add to your hand") || safeLower(card.getDescription()).contains("set 1"))) {
-            routes.add(card.getName() + " -> adds or sets " + joinCardNames(spellTrapSupport) + " for follow-up.");
-        }
+            if (sourceCanSummon && isSelfSummoningBridgeTarget(candidate, targetDescription)) {
+                score += 60;
+                reasons.add("This card can special summon itself or another extender");
+            }
 
-        if (!followUps.isEmpty()) {
-            Card followUp = followUps.get(0);
-            routes.add(card.getName() + " -> keeps the turn going into " + followUp.getName() + " as the follow-up piece.");
-        }
+            if (sourceCanRecover && isGraveyardBridgeTarget(candidate, targetDescription)) {
+                score += 55;
+                reasons.add("This card has graveyard recursion that turns setup into follow-up");
+            }
 
-        return routes;
-    }
+            if (sourceCanSetBackrow && isBackrowBridgeTarget(candidate, targetDescription)) {
+                score += 40;
+                reasons.add("This is searchable/settable backrow follow-up");
+            }
 
-    private List<String> buildTextureComboRoutes(Card card, String description, List<Card> relatedCards) {
-        List<String> routes = new ArrayList<>();
-        if (description.contains("special summon") && !relatedCards.isEmpty()) {
-            Card extender = relatedCards.stream().filter(this::isExtenderCard).findFirst().orElse(relatedCards.get(0));
-            routes.add(extender.getName() + " -> special summons into " + card.getName() + " or another " + archetypeLabel(card) + " card.");
-        }
+            if (score <= 0) {
+                continue;
+            }
 
-        if (description.contains("send to graveyard") || description.contains("discard")) {
-            Card gyPayoff = relatedCards.stream().filter(this::isFollowUpCard).findFirst().orElse(null);
-            if (gyPayoff != null) {
-                routes.add(card.getName() + " -> dumps resources so " + gyPayoff.getName() + " becomes live.");
+            ComboDraft draft = draftFor(drafts, candidate);
+            addScore(draft, score, "Text-driven combo bridge");
+            draft.reasons.addAll(reasons);
+            if (isStarterCard(candidate)) {
+                draft.reasons.add("Acts as a starter once accessed");
+            } else if (isExtenderCard(candidate)) {
+                draft.reasons.add("Acts as an extender once accessed");
+            } else if (isFollowUpCard(candidate)) {
+                draft.reasons.add("Useful for follow-up after the first line");
             }
         }
-
-        if (description.contains("banish")) {
-            Card banishSupport = relatedCards.stream()
-                    .filter(c -> safeLower(c.getDescription()).contains("banish") || safeLower(c.getName()).contains("banish"))
-                    .findFirst()
-                    .orElse(null);
-            if (banishSupport != null) {
-                routes.add(card.getName() + " -> use " + banishSupport.getName() + " to turn the banish effect into follow-up.");
-            }
-        }
-
-        if (description.contains("negate")) {
-            Card interaction = relatedCards.stream().filter(c -> safeLower(c.getDescription()).contains("negate")).findFirst().orElse(null);
-            if (interaction != null) {
-                routes.add(interaction.getName() + " -> protects " + card.getName() + " by covering the interaction step.");
-            }
-        }
-
-        return routes;
-    }
-
-    private String archetypeLabel(Card card) {
-        return card.getArchetype() == null || card.getArchetype().isBlank() ? "deck" : card.getArchetype();
-    }
-
-    private String joinCardNames(List<Card> cards) {
-        return cards.stream().map(Card::getName).collect(Collectors.joining(" / "));
     }
 
     private boolean isSpellOrTrap(Card card) {
@@ -413,14 +445,27 @@ public class YugiohService {
         return type.contains("spell") || type.contains("trap");
     }
 
+    private boolean isFusionMonster(Card card) {
+        String type = safeLower(card.getType());
+        return type.contains("fusion") && type.contains("monster");
+    }
+
     private boolean isStarterCard(Card card) {
         String desc = safeLower(card.getDescription());
-        return desc.contains("search") || desc.contains("add to hand") || desc.contains("draw") || desc.contains("reveal");
+        return containsAny(desc, "search", "add to hand", "add 1", "draw", "reveal");
     }
 
     private boolean isExtenderCard(Card card) {
         String desc = safeLower(card.getDescription());
-        return desc.contains("special summon") || desc.contains("from your hand") || desc.contains("from your graveyard") || desc.contains("extra deck");
+        return containsAny(desc,
+                "special summon this card",
+                "special summon itself",
+                "special summon from your hand",
+                "special summon from your graveyard",
+                "if this card is in your hand",
+                "from your hand",
+                "from your graveyard",
+                "extra deck");
     }
 
     private boolean isPayoffCard(Card card) {
@@ -430,7 +475,56 @@ public class YugiohService {
 
     private boolean isFollowUpCard(Card card) {
         String desc = safeLower(card.getDescription());
-        return desc.contains("graveyard") || desc.contains("end phase") || desc.contains("set 1") || desc.contains("add to your hand") || desc.contains("search");
+        return containsAny(desc, "graveyard", "end phase", "set 1", "add to your hand", "search", "recycle", "return to the hand");
+    }
+
+    private boolean isSearchBridgeTarget(Card card, String description) {
+        return isSpellOrTrap(card)
+                ? containsAny(description, "search", "add 1", "add to your hand", "set 1", "reveal")
+                : containsAny(description, "search", "add 1", "add to your hand", "special summon this card", "special summon itself", "from your hand", "from your graveyard");
+    }
+
+    private boolean isSelfSummoningBridgeTarget(Card card, String description) {
+        if (!safeLower(card.getType()).contains("monster")) {
+            return false;
+        }
+
+        return containsAny(description,
+                "special summon this card",
+                "special summon itself",
+                "special summon from your hand",
+                "special summon from your graveyard",
+                "if this card is in your hand",
+                "if this card is sent to the graveyard",
+                "if this card is normal summoned",
+                "if you control");
+    }
+
+    private boolean isGraveyardBridgeTarget(Card card, String description) {
+        return containsAny(description,
+                "from your graveyard",
+                "if this card is sent to the graveyard",
+                "banish this card",
+                "return this card from your graveyard",
+                "send this card to the graveyard",
+                "during the end phase");
+    }
+
+    private boolean isBackrowBridgeTarget(Card card, String description) {
+        return isSpellOrTrap(card) && containsAny(description, "search", "add 1", "add to your hand", "set 1", "recycle", "activate 1");
+    }
+
+    private boolean containsAny(String text, String... terms) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+
+        for (String term : terms) {
+            if (term != null && !term.isBlank() && text.contains(term)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String safeLower(String value) {
@@ -474,5 +568,130 @@ public class YugiohService {
         }
 
         return cards.get(0);
+    }
+
+    private ComboDraft draftFor(Map<String, ComboDraft> drafts, Card card) {
+        return drafts.computeIfAbsent(safeLower(card.getName()), key -> new ComboDraft(card));
+    }
+
+    private void addScore(ComboDraft draft, int points, String reason) {
+        draft.score += points;
+        if (reason != null && !reason.isBlank()) {
+            draft.reasons.add(reason);
+        }
+    }
+
+    private String joinReasons(LinkedHashSet<String> reasons) {
+        if (reasons.isEmpty()) {
+            return "Good follow-up option";
+        }
+        return String.join("; ", reasons);
+    }
+
+    private String comboLabelFor(Card card) {
+        if (isStarterCard(card)) {
+            return "starter";
+        }
+        if (isExtenderCard(card)) {
+            return "extender";
+        }
+        if (isFollowUpCard(card)) {
+            return "follow-up";
+        }
+        return "support";
+    }
+
+    private List<ComboOption> buildCuratedGuideCombos(Card card) {
+        List<ComboOption> options = new ArrayList<>();
+        String name = safeLower(card.getName());
+        String archetype = safeLower(card.getArchetype());
+
+        if (name.contains("d/d") || archetype.contains("d/d")) {
+            addCuratedCombo(options, "D/D Savant Kepler", card, "Guide-backed starter: Kepler searches Dark Contract with the Gate, which searches any D/D monster.", "starter", 120);
+            addCuratedCombo(options, "Dark Contract with the Gate", card, "Guide-backed starter: Gate searches any D/D monster and is itself a one-card combo.", "starter", 115);
+            addCuratedCombo(options, "D/D Gryphon", card, "Guide-backed extender: Gryphon special summons itself and searches after it hits the GY.", "extender", 110);
+            addCuratedCombo(options, "D/D Necro Slime", card, "Guide-backed extender: Necro Slime enables Fusion Summons by banishing itself and another D/D from the GY.", "extender", 108);
+            addCuratedCombo(options, "D/D Count Surveyor", card, "Guide-backed extender: Count Surveyor discards another D/D and replaces the discard with another search target.", "extender", 106);
+            addCuratedCombo(options, "D/D/D Zero Doom Queen Machinex", card, "Guide-backed follow-up: Machinex is a 1-card starter that can place a Dark Contract directly from the deck.", "follow-up", 130);
+            addCuratedCombo(options, "D/D Lance Soldier", card, "Guide-backed extender: Lance Soldier destroys a Dark Contract to summon itself and manipulate levels.", "extender", 104);
+            addCuratedCombo(options, "D/D Orthros", card, "Guide-backed utility: Orthros is the low-scale extender and backrow remover used in combo lines.", "support", 100);
+        }
+
+        if (name.contains("swordsoul") || archetype.contains("swordsoul") || name.contains("incredible ecclesia")) {
+            addCuratedCombo(options, "Swordsoul of Mo Ye", card, "Guide-backed starter: Mo Ye generates a Token and is the cleanest route into Level 8 Synchro plays.", "starter", 120);
+            addCuratedCombo(options, "Swordsoul Strategist Longyuan", card, "Guide-backed extender: Longyuan discards a card to reach Baronne de Fleur or other Level 10 Synchro lines.", "extender", 118);
+            addCuratedCombo(options, "Swordsoul Blackout", card, "Guide-backed follow-up: Blackout is the searchable interaction piece that completes the line.", "follow-up", 112);
+            addCuratedCombo(options, "Swordsoul Grandmaster - Chixiao", card, "Guide-backed follow-up: the basic Mo Ye line turns into Chixiao.", "follow-up", 116);
+            addCuratedCombo(options, "Baronne de Fleur", card, "Guide-backed follow-up: Longyuan makes the simple Baronne line.", "follow-up", 114);
+        }
+
+        if (name.contains("archfiend") || archetype.contains("archfiend") || name.contains("tour guide")) {
+            addCuratedCombo(options, "Archfiend Heiress", card, "Guide-backed searcher: Heiress converts Archfiend names into more access.", "starter", 112);
+            addCuratedCombo(options, "Archfiend Strategy", card, "Guide-backed searcher: Strategy finds any Archfiend card and keeps the engine moving.", "starter", 110);
+            addCuratedCombo(options, "Archfiend's Usurpation", card, "Guide-backed starter/removal card: Usurpation can start plays and acts as a ritual spell.", "starter", 108);
+            addCuratedCombo(options, "Archfiend Emperor", card, "Guide-backed follow-up: Emperor is the main boss monster and primary endboard piece.", "follow-up", 130);
+            addCuratedCombo(options, "Archfiend Matriarch", card, "Guide-backed follow-up: Matriarch is the grind-game recycler and follow-up threat.", "follow-up", 114);
+        }
+
+        if (name.contains("dogmatika") || archetype.contains("dogmatika") || name.contains("ecclesia") || name.contains("nadir servant") || name.contains("fallen of the white dragon")) {
+            addCuratedCombo(options, "Dogmatika Ecclesia, the Virtuous", card, "Guide-backed starter: Ecclesia searches any Dogmatika card and is the cleanest bridge into the archetype.", "starter", 120);
+            addCuratedCombo(options, "Nadir Servant", card, "Guide-backed starter: Nadir Servant sends an Extra Deck monster to access Dogmatika pieces.", "starter", 116);
+            addCuratedCombo(options, "Dogmatika Punishment", card, "Guide-backed follow-up: Punishment is the main trap interaction and converts into ED-based removal.", "follow-up", 112);
+            addCuratedCombo(options, "Dogmatika Fleurdelis, the Knighted", card, "Guide-backed extender: Fleurdelis is the on-board negate that follows Dogmatika access pieces.", "extender", 108);
+            addCuratedCombo(options, "The Fallen & The Virtuous", card, "Guide-backed follow-up: the main send-and-destroy spell that converts Dogmatika setup into tempo.", "follow-up", 114);
+        }
+
+        if (name.contains("exosister") || archetype.contains("exosister") || name.contains("martha") || name.contains("pax")) {
+            addCuratedCombo(options, "Exosister Martha", card, "Guide-backed starter: Martha is the easiest way to get an Exosister body on board.", "starter", 120);
+            addCuratedCombo(options, "Exosister Pax", card, "Guide-backed starter: Pax is the deck's main search spell and links the rest of the line together.", "starter", 118);
+            addCuratedCombo(options, "Exosister Mikailis", card, "Guide-backed follow-up: Mikailis is the primary first Xyz that turns the starter into advantage.", "follow-up", 116);
+            addCuratedCombo(options, "Exosister Kaspitell", card, "Guide-backed extender: Kaspitell converts spare names into another rank 4 body.", "extender", 110);
+            addCuratedCombo(options, "Exosister Magnifica", card, "Guide-backed follow-up: Magnifica is the layered endboard upgrade that gives the deck its closing power.", "follow-up", 114);
+            addCuratedCombo(options, "Exosister Karmael", card, "Guide-backed follow-up: Karmael gives the deck another disruption layer and a way to keep playing.", "follow-up", 106);
+        }
+
+        if (name.contains("stardust") || name.contains("bystial") || archetype.contains("bystial") || archetype.contains("stardust")) {
+            addCuratedCombo(options, "Stardust Dragon", card, "Guide-backed starter: Stardust is the centerpiece used to branch into the modern Synchro lines.", "starter", 120);
+            addCuratedCombo(options, "Bystial Magnamhut", card, "Guide-backed extender: Magnamhut is one of the best ways to convert a grave setup into follow-up.", "extender", 118);
+            addCuratedCombo(options, "Bystial Druiswurm", card, "Guide-backed extender: Druiswurm is a live Bystial body that both pressures and clears cards.", "extender", 114);
+            addCuratedCombo(options, "Stardust Synchron", card, "Guide-backed starter: Synchron is the card that converts Stardust access into the combo tree.", "starter", 116);
+            addCuratedCombo(options, "Junk Speeder", card, "Guide-backed follow-up: Speeder is one of the big Synchro route endpoints if your build includes the Warrior package.", "follow-up", 112);
+            addCuratedCombo(options, "Dis Pater, the Black Dragon", card, "Guide-backed follow-up: Dis Pater is a recurring Synchro payoff and recursion piece.", "follow-up", 110);
+        }
+
+        options.sort(Comparator
+                .comparingInt((ComboOption option) -> option.score()).reversed()
+                .thenComparing(option -> option.card().getName(), String.CASE_INSENSITIVE_ORDER));
+        return options.stream().limit(5).collect(Collectors.toList());
+    }
+
+    private void addCuratedCombo(List<ComboOption> options, String targetName, Card sourceCard, String reason, String label, int score) {
+        Card target = findBestCardMatch(targetName);
+        if (target == null || Objects.equals(target.getId(), sourceCard.getId())) {
+            return;
+        }
+
+        if (!sameArchetype(sourceCard, target)) {
+            return;
+        }
+
+        options.add(new ComboOption(target, reason, score, label));
+    }
+
+    private boolean sameArchetype(Card sourceCard, Card targetCard) {
+        String sourceArchetype = safeLower(sourceCard.getArchetype()).trim();
+        String targetArchetype = safeLower(targetCard.getArchetype()).trim();
+        if (sourceArchetype.isBlank() || targetArchetype.isBlank()) {
+            return false;
+        }
+        return sourceArchetype.equals(targetArchetype);
+    }
+
+    private boolean sameArchetype(String sourceArchetype, Card targetCard) {
+        String targetArchetype = safeLower(targetCard.getArchetype()).trim();
+        if (sourceArchetype == null || sourceArchetype.isBlank() || targetArchetype.isBlank()) {
+            return false;
+        }
+        return sourceArchetype.trim().equals(targetArchetype);
     }
 }
