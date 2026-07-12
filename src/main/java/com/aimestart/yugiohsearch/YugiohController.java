@@ -5,7 +5,9 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/yugioh")
-@CrossOrigin(originPatterns = {"http://localhost:5173"})
+@CrossOrigin(originPatterns = {"http://localhost:5173",
+        "https://yugioh-combo.vercel.app"
+})
 public class YugiohController {
 
     private final YugiohService yugiohService;
