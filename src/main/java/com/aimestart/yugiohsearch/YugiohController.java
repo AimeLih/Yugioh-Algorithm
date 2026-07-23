@@ -31,8 +31,25 @@ public class YugiohController {
         return yugiohService.getCardByName(name);
     }
     @GetMapping("/card/combos")
-    public List<YugiohService.ComboOption> getPossibleCombos(@RequestParam String name) {
-        return yugiohService.getPossibleCombos(name);
+    public List<YugiohService.ComboOption> getPossibleCombos(
+            @RequestParam String name,
+            @RequestParam(required = false) String zone
+    ) {
+        return yugiohService.getPossibleCombos(name, zone);
+    }
+    @GetMapping("/card/fusion-materials")
+    public YugiohService.FusionMaterialPlan getFusionMaterials(
+            @RequestParam String source,
+            @RequestParam String target
+    ) {
+        return yugiohService.getFusionMaterialPlan(source, target);
+    }
+    @GetMapping("/card/cost-materials")
+    public YugiohService.FusionMaterialPlan getCostMaterials(
+            @RequestParam String source,
+            @RequestParam String target
+    ) {
+        return yugiohService.getCardCostPlan(source, target);
     }
     @GetMapping("/card/substring")
     public List<Card> getCardBySubstring(@RequestParam String name){
