@@ -1,0 +1,40 @@
+name: Weekly Yu-Gi-Oh Card Import
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    # Every Sunday at 4:17 AM Chicago time
+    - cron: "17 4 * * 0"
+      timezone: "America/Chicago"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: weekly-yugioh-card-import
+  cancel-in-progress: false
+
+jobs:
+  import-new-cards:
+    name: Import newly released cards
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Call protected card import endpoint
+        env:
+          BACKEND_URL: ${{ secrets.IMPORT_URL }}
+          IMPORT_TOKEN: ${{ secrets.IMPORT_TOKEN }}
+        run: |
+          curl \
+            --fail-with-body \
+            --show-error \
+            --silent \
+            --retry 3 \
+            --retry-delay 10 \
+            --retry-all-errors \
+            --max-time 600 \
+            --request POST \
+            --header "X-Import-Token: $IMPORT_TOKEN" \
+            "${IMPORT_URL%/}/yugioh/admin/import"

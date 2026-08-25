@@ -3,10 +3,21 @@ package com.aimestart.yugiohsearch;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.function.Function;
@@ -16,15 +27,31 @@ import java.util.stream.Collectors;
 @Service
 public class YugiohService {
 
+    private static final String API_BASE_URL = "https://db.ygoprodeck.com/api/v7";
+
     private final RestClient restClient;
     private final CardRepository cardRepository;
 
     public record CardInfoResponse(List<CardData> data) {}
-    public record CardImage(
-            @JsonProperty("image_url") String imageUrl
+
+    public record CardImage(@JsonProperty("image_url") String imageUrl) {}
+
+    public record CardData(
+            String name,
+            String desc,
+            String type,
+            Integer atk,
+            Integer def,
+            Integer level,
+            String race,
+            String attribute,
+            Integer linkval,
+            String archetype,
+            String[] linkmarkers,
+            Integer scale,
+            @JsonProperty("card_images") List<CardImage> cardImages
     ) {}
-    public record CardData(String name, String desc, String type, Integer atk, Integer def, Integer level,
-                           String race, String attribute, Integer linkval, String archetype, String [] linkmarkers, String staple, Integer scale, @JsonProperty("card_images") List<CardImage> cardImages) {}
+
     public record ComboOption(
             Card card,
             String reason,
@@ -65,7 +92,7 @@ public class YugiohService {
     private record EffectSection(String text, String sourceZone) {}
 
     public YugiohService(RestClient.Builder builder, CardRepository cardRepository) {
-        this.restClient = builder.baseUrl("https://db.ygoprodeck.com/api/v7").build();
+        this.restClient = builder.baseUrl(API_BASE_URL).build();
         this.cardRepository = cardRepository;
     }
 
@@ -84,63 +111,49 @@ public class YugiohService {
     }
 
     public void importAllCards() {
-        List<CardData> apiCards = fetchallCards();
-        List<Card> cardsToSave = new ArrayList<>();
-        for (CardData card : apiCards) {
-            //if (!cardRepository.existsByName(card.name())) {
-                cardsToSave.add(new Card(card.name(), card.desc(), card.type(), 0));
-           // }
-        }
+        List<Card> cardsToSave = fetchallCards().stream()
+                .map(card -> new Card(card.name(), card.desc(), card.type(), 0))
+                .toList();
         cardRepository.saveAll(cardsToSave);
         updateExistingCards();
+    }
 
+    @Transactional
+    public int importNewCards() {
+        return importNewCards(fetchallCards(), fetchStapleCardNames());
+    }
+
+    int importNewCards(List<CardData> apiCards, Set<String> stapleNames) {
+        Set<String> existingNames = cardRepository.findAll().stream()
+                .map(Card::getName)
+                .map(this::normalizedCardName)
+                .collect(Collectors.toSet());
+
+        List<Card> newCards = apiCards.stream()
+                .filter(apiCard -> existingNames.add(normalizedCardName(apiCard.name())))
+                .map(apiCard -> createCard(apiCard, stapleNames))
+                .toList();
+
+        if (!newCards.isEmpty()) {
+            cardRepository.saveAll(newCards);
+        }
+        return newCards.size();
     }
 
     public void updateExistingCardsWeight() {
         List<Card> cards = cardRepository.findAll();
-        List<CardData> apiCards = fetchallCards();
+        Map<String, String> cardTypes = fetchallCards().stream()
+                .collect(Collectors.toMap(CardData::name, CardData::type, (first, ignored) -> first));
+
         for (Card card : cards) {
-            for (CardData apiCard : apiCards) {
-                if (card.getName().equals(apiCard.name())) {
-                    String TYPE = apiCard.type();
-                    card.setType(TYPE);
-                    boolean switchwork = false;
-                    switch(TYPE){
-                        case "Spell Card":
-                            card.setWeight(4);
-                            switchwork = true;
-                            break;
-                        case "Trap Card":
-                            card.setWeight(3);
-                            switchwork = true;
-                            break;
-                        case "Effect Monster":
-                            card.setWeight(2);
-                            switchwork = true;
-                            break;
-                        case "Normal Monster":
-                            card.setWeight(1);
-                            switchwork = true;
-                            break;
-                        default:
-                    }
-                    if(!switchwork){
-                        if(TYPE.contains("Spell")){
-                            card.setWeight(4);
-                        } else if (TYPE.contains("Trap")) {
-                            card.setWeight(3);
-                        } else if (TYPE.contains("Monster")) {
-                            card.setWeight(2);
-                        } else {
-                            card.setWeight(1);
-                        }
-                    }
-                    cardRepository.save(card);
-                }
+            String type = cardTypes.get(card.getName());
+            if (type != null) {
+                card.setType(type);
+                card.setWeight(weightForType(type));
             }
         }
+        cardRepository.saveAll(cards);
     }
-
 
     public Set<String> fetchStapleCardNames() {
         try {
@@ -153,7 +166,6 @@ public class YugiohService {
                     .body(CardInfoResponse.class);
 
             if (response != null && response.data() != null) {
-
                 return response.data().stream()
                         .map(CardData::name)
                         .collect(Collectors.toSet());
@@ -164,13 +176,14 @@ public class YugiohService {
         return Collections.emptySet();
     }
 
-    public String getImage(Card card){
+    public String getImage(Card card) {
         return card.getCardImageUrl();
     }
+
     public void updateExistingCards() {
         List<Card> cards = cardRepository.findAll();
         Map<String, CardData> apiCards = fetchallCards().stream()
-                .collect(Collectors.toMap(CardData::name, Function.identity()));
+                .collect(Collectors.toMap(CardData::name, Function.identity(), (first, ignored) -> first));
 
         Set<String> stapleNames = fetchStapleCardNames();
         for (Card card : cards) {
@@ -179,69 +192,75 @@ public class YugiohService {
                 continue;
             }
 
-            card.setStaple(stapleNames.contains(card.getName()));
-
-            if (apiCard.cardImages() != null && !apiCard.cardImages().isEmpty()) {
-                card.setCardImageUrl(apiCard.cardImages().get(0).imageUrl());
-            }
-
-            String cardType = apiCard.type() != null ? apiCard.type() : card.getType();
-            if (cardType != null) {
-                card.setType(cardType);
-            }
-
-            if (cardType != null && cardType.contains("Pendulum")) {
-                card.setScale(apiCard.scale());
-            }
-
-            if (cardType != null && cardType.contains("Link") && cardType.contains("Monster")) {
-                card.setLinkvalue(apiCard.linkval());
-                if (apiCard.linkmarkers() != null) {
-                    card.setLinkmarkers(Arrays.asList(apiCard.linkmarkers()));
-                }
-            } else if (cardType != null && cardType.contains("Monster")) {
-                card.setAtk(apiCard.atk());
-                card.setDef(apiCard.def());
-                card.setLevel(apiCard.level());
-                card.setRace(apiCard.race());
-                card.setAttribute(apiCard.attribute());
-            } else if (cardType != null && (cardType.contains("Spell") || cardType.contains("Trap"))) {
-                card.setRace(apiCard.race());
-            }
-
-            if (apiCard.archetype() != null && !apiCard.archetype().isBlank()) {
-                card.setArchetype(apiCard.archetype());
-            }
+            applyApiData(card, apiCard, stapleNames);
         }
         cardRepository.saveAll(cards);
     }
 
-    public void updateDatabaseCards() {
-        List<Card> cards = cardRepository.findAll();
-      for(Card card : cards){
-          if(card.getType().equals("Effect Monster")){
-              if(card.getDescription().toLowerCase().contains("banish") || card.getDescription().toLowerCase().contains("destroy") &&
-                      card.getDescription().toLowerCase().contains("quick effect")) {
-                  card.setWeight(card.getWeight() + 6); //placeholder value
-              }
-              if(card.getDescription().toLowerCase().contains("banish") || card.getDescription().toLowerCase().contains("destroy") &&
-                      card.getDescription().toLowerCase().contains("target") && card.getDescription().toLowerCase().contains("quick effect")) {
-                  card.setWeight(card.getWeight() + 5); //placeholder value
-              }
-              if(card.getDescription().toLowerCase().contains("banish") || card.getDescription().toLowerCase().contains("destroy") &&
-                      card.getDescription().toLowerCase().contains("target")) {
-                  card.setWeight(card.getWeight() + 4); //placeholder value
-              }
-              if(card.getDescription().toLowerCase().contains("add")){
-                  card.setWeight(card.getWeight() + 3); //placeholder value
-              }
-          }
-      }
-
+    private int weightForType(String type) {
+        if (type.contains("Spell")) {
+            return 4;
+        }
+        if (type.contains("Trap")) {
+            return 3;
+        }
+        if (type.contains("Monster")) {
+            return type.equals("Normal Monster") ? 1 : 2;
+        }
+        return 1;
     }
 
-    public List<Card> getAllCards(){
-      return cardRepository.findAll();
+    private void applyApiData(Card card, CardData apiCard, Set<String> stapleNames) {
+        card.setStaple(stapleNames.contains(card.getName()));
+
+        if (apiCard.cardImages() != null && !apiCard.cardImages().isEmpty()) {
+            card.setCardImageUrl(apiCard.cardImages().get(0).imageUrl());
+        }
+
+        String cardType = apiCard.type() != null ? apiCard.type() : card.getType();
+        if (cardType == null) {
+            return;
+        }
+
+        card.setType(cardType);
+        if (cardType.contains("Pendulum")) {
+            card.setScale(apiCard.scale());
+        }
+
+        if (cardType.contains("Monster")) {
+            card.setAtk(apiCard.atk());
+            card.setDef(apiCard.def());
+            card.setLevel(apiCard.level());
+            card.setRace(apiCard.race());
+            card.setAttribute(apiCard.attribute());
+
+            if (cardType.contains("Link")) {
+                card.setLinkvalue(apiCard.linkval());
+                if (apiCard.linkmarkers() != null) {
+                    card.setLinkmarkers(Arrays.asList(apiCard.linkmarkers()));
+                }
+            }
+        } else if (cardType.contains("Spell") || cardType.contains("Trap")) {
+            card.setRace(apiCard.race());
+        }
+
+        if (apiCard.archetype() != null && !apiCard.archetype().isBlank()) {
+            card.setArchetype(apiCard.archetype());
+        }
+    }
+
+    private Card createCard(CardData apiCard, Set<String> stapleNames) {
+        Card card = new Card(apiCard.name(), apiCard.desc(), apiCard.type(), 0);
+        applyApiData(card, apiCard, stapleNames);
+        return card;
+    }
+
+    private String normalizedCardName(String name) {
+        return name.toLowerCase(Locale.ROOT);
+    }
+
+    public List<Card> getAllCards() {
+        return cardRepository.findAll();
     }
 
     public List<ComboOption> getPossibleCombos(String cardName) {
@@ -249,10 +268,7 @@ public class YugiohService {
     }
 
     public List<ComboOption> getPossibleCombos(String cardName, String zone) {
-        Card card = cardRepository.getCardByName(cardName);
-        if (card == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Card not found: " + cardName);
-        }
+        Card card = requireCard(cardName);
 
         String zoneLabel = normalizedZoneLabel(zone);
         String description = zoneLabel.isBlank()
@@ -445,9 +461,8 @@ public class YugiohService {
     }
 
     public String ifExtender(String focusedcard) {
-        Card card = cardRepository.getCardByName(focusedcard);
-        if (card == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Card not found: " + focusedcard);
-        String desc = card.getDescription() != null ? card.getDescription().toLowerCase() : "";
+        Card card = requireCard(focusedcard);
+        String desc = safeLower(card.getDescription());
         if (Pattern.compile("summon\\s+\\d+").matcher(desc).find()) {
             return "summon extender";
         }
@@ -458,9 +473,15 @@ public class YugiohService {
     }
 
     public String isOncePerTurn(String focusedcard) {
-        Card card = cardRepository.getCardByName(focusedcard);
-        if (card == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Card not found: " + focusedcard);
-        return oncePerTurnRule(card);
+        return oncePerTurnRule(requireCard(focusedcard));
+    }
+
+    private Card requireCard(String name) {
+        Card card = cardRepository.getCardByName(name);
+        if (card == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Card not found: " + name);
+        }
+        return card;
     }
 
     private String oncePerTurnRule(Card card) {
@@ -489,11 +510,9 @@ public class YugiohService {
         return !oncePerTurnRule(card).equals("Not once per turn");
     }
 
-    public void allCardWeightZero(){
+    public void allCardWeightZero() {
         List<Card> cards = cardRepository.findAll();
-        for(Card card : cards){
-            card.setWeight(0);
-        }
+        cards.forEach(card -> card.setWeight(0));
         cardRepository.saveAll(cards);
     }
 
@@ -1077,11 +1096,6 @@ public class YugiohService {
                 "set it",
                 "place 1",
                 "place this card");
-    }
-
-    private boolean isPayoffCard(Card card) {
-        String type = safeLower(card.getType());
-        return type.contains("fusion") || type.contains("synchro") || type.contains("xyz") || type.contains("link") || type.contains("ritual");
     }
 
     private boolean isFollowUpCard(Card card) {

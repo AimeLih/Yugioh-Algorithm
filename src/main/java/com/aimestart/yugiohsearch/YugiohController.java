@@ -2,13 +2,22 @@ package com.aimestart.yugiohsearch;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
-
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 @RestController
 @RequestMapping("/yugioh")
 @CrossOrigin(originPatterns = {"http://localhost:5173",
         "https://yugioh-combo.vercel.app"
 })
+
+
 public class YugiohController {
+
+    private static final String IMPORT_TOKEN_HEADER = "X-Import-Token";
+
+    @Value("${import.token}")
+    private String importToken;
 
     private final YugiohService yugiohService;
 
@@ -17,8 +26,11 @@ public class YugiohController {
     }
 
     @PostMapping("/import")
-    public void importAllCards(){
-         yugiohService.importAllCards();
+    public void importAllCards(
+            @RequestHeader(value = IMPORT_TOKEN_HEADER, required = false) String providedToken
+    ) {
+        requireImportToken(providedToken);
+        yugiohService.importAllCards();
     }
 
     @GetMapping("/card/image")
@@ -62,12 +74,18 @@ public class YugiohController {
         return yugiohService.getAllCards();
     }
     @PutMapping("/card/update")
-    public void updatingCards(){
+    public void updatingCards(
+            @RequestHeader(value = IMPORT_TOKEN_HEADER, required = false) String providedToken
+    ) {
+        requireImportToken(providedToken);
         yugiohService.updateExistingCardsWeight();
     }
 
     @PutMapping("/card/update/database")
-    public void updatingExistingCards(){
+    public void updatingExistingCards(
+            @RequestHeader(value = IMPORT_TOKEN_HEADER, required = false) String providedToken
+    ) {
+        requireImportToken(providedToken);
         yugiohService.updateExistingCards();
     }
 
@@ -83,7 +101,33 @@ public class YugiohController {
 
 
     @PutMapping("/card/update/zero")
-    public void allCardWeightZero(){
+    public void allCardWeightZero(
+            @RequestHeader(value = IMPORT_TOKEN_HEADER, required = false) String providedToken
+    ) {
+        requireImportToken(providedToken);
         yugiohService.allCardWeightZero();
     }
+
+    public record ImportResult(int cardsAdded) {}
+
+    @PostMapping("/admin/import")
+    public ImportResult importNewCards(
+            @RequestHeader(value = IMPORT_TOKEN_HEADER, required = false)
+            String providedToken
+    ) {
+        requireImportToken(providedToken);
+        return new ImportResult(yugiohService.importNewCards());
+    }
+
+    private void requireImportToken(String providedToken) {
+        if (importToken.isBlank()
+                || providedToken == null
+                || !importToken.equals(providedToken)) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
+                    "Invalid import token"
+            );
+        }
+    }
+
+
 }
