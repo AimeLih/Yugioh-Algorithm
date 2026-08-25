@@ -24,9 +24,29 @@ jobs:
     steps:
       - name: Call protected card import endpoint
         env:
-          BACKEND_URL: ${{ secrets.IMPORT_URL }}
+          IMPORT_URL: ${{ secrets.IMPORT_URL }}
           IMPORT_TOKEN: ${{ secrets.IMPORT_TOKEN }}
         run: |
+          set -euo pipefail
+
+          if [ -z "$IMPORT_URL" ]; then
+            echo "::error::IMPORT_URL repository secret is missing"
+            exit 1
+          fi
+
+          if [ -z "$IMPORT_TOKEN" ]; then
+            echo "::error::IMPORT_TOKEN repository secret is missing"
+            exit 1
+          fi
+
+          case "$IMPORT_URL" in
+            https://*) ;;
+            *)
+              echo "::error::IMPORT_URL must start with https://"
+              exit 1
+              ;;
+          esac
+
           curl \
             --fail-with-body \
             --show-error \
