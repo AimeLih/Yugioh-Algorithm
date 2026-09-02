@@ -24,7 +24,7 @@ public class YugiohController {
     public YugiohController(YugiohService yugiohService) {
         this.yugiohService = yugiohService;
     }
-
+    //imports all cards from the yugioh api database into the Neon database
     @PostMapping("/import")
     public void importAllCards(
             @RequestHeader(value = IMPORT_TOKEN_HEADER, required = false) String providedToken
@@ -32,16 +32,18 @@ public class YugiohController {
         requireImportToken(providedToken);
         yugiohService.importAllCards();
     }
-
+    //gets the specific image of a card
     @GetMapping("/card/image")
     public String getImage(@RequestParam String name){
         Card card = yugiohService.getCardByName(name);
         return yugiohService.getImage(card);
     }
+    //returns the info of a specific card
     @GetMapping("/card")
     public Card getCardByName(@RequestParam String name){
         return yugiohService.getCardByName(name);
     }
+    //Combo logic
     @GetMapping("/card/combos")
     public List<YugiohService.ComboOption> getPossibleCombos(
             @RequestParam String name,
@@ -49,6 +51,7 @@ public class YugiohController {
     ) {
         return yugiohService.getPossibleCombos(name, zone);
     }
+    //Fusion logic
     @GetMapping("/card/fusion-materials")
     public YugiohService.FusionMaterialPlan getFusionMaterials(
             @RequestParam String source,
@@ -56,6 +59,7 @@ public class YugiohController {
     ) {
         return yugiohService.getFusionMaterialPlan(source, target);
     }
+    //card cost logic
     @GetMapping("/card/cost-materials")
     public YugiohService.FusionMaterialPlan getCostMaterials(
             @RequestParam String source,
@@ -63,16 +67,18 @@ public class YugiohController {
     ) {
         return yugiohService.getCardCostPlan(source, target);
     }
+    //returns cards by substrings
     @GetMapping("/card/substring")
     public List<Card> getCardBySubstring(@RequestParam String name){
         return yugiohService.getCardsBySubstring(name);
     }
-
+    //returns all cards in the database
     @Cacheable("Cards")
     @GetMapping("/card/all")
     public List<Card> getAllCards(){
         return yugiohService.getAllCards();
     }
+    //updates a cards weight
     @PutMapping("/card/update")
     public void updatingCards(
             @RequestHeader(value = IMPORT_TOKEN_HEADER, required = false) String providedToken
@@ -80,7 +86,7 @@ public class YugiohController {
         requireImportToken(providedToken);
         yugiohService.updateExistingCardsWeight();
     }
-
+    //updates cards if their info is outdated - very unlikely to ever happen
     @PutMapping("/card/update/database")
     public void updatingExistingCards(
             @RequestHeader(value = IMPORT_TOKEN_HEADER, required = false) String providedToken
@@ -88,18 +94,18 @@ public class YugiohController {
         requireImportToken(providedToken);
         yugiohService.updateExistingCards();
     }
-
+    //checks if its an extender
     @GetMapping("/card/pattern")
     public String patternCard(@RequestParam String name){
         return yugiohService.ifExtender(name);
     }
-
+    //checks for onceperturn
     @GetMapping("/card/onceprturn")
     public String isOncePerTurn(@RequestParam String name){
         return yugiohService.isOncePerTurn(name);
     }
 
-
+    //puts all cards weight to 0
     @PutMapping("/card/update/zero")
     public void allCardWeightZero(
             @RequestHeader(value = IMPORT_TOKEN_HEADER, required = false) String providedToken
@@ -109,7 +115,7 @@ public class YugiohController {
     }
 
     public record ImportResult(int cardsAdded) {}
-
+    //imports new cards from the yugioh api database into the Neon database
     @PostMapping("/admin/import")
     public ImportResult importNewCards(
             @RequestHeader(value = IMPORT_TOKEN_HEADER, required = false)
