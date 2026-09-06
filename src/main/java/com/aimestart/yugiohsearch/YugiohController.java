@@ -1,4 +1,5 @@
 package com.aimestart.yugiohsearch;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
@@ -39,6 +40,7 @@ public class YugiohController {
         return yugiohService.getImage(card);
     }
     //returns the info of a specific card
+    @Cacheable(value = "Card", key = "#name.toLowerCase()" )
     @GetMapping("/card")
     public Card getCardByName(@RequestParam String name){
         return yugiohService.getCardByName(name);
@@ -68,6 +70,7 @@ public class YugiohController {
         return yugiohService.getCardCostPlan(source, target);
     }
     //returns cards by substrings
+    @Cacheable(value = "CardsBySubString", key = "#name.toLowerCase()" )
     @GetMapping("/card/substring")
     public List<Card> getCardBySubstring(@RequestParam String name){
         return yugiohService.getCardsBySubstring(name);
@@ -78,7 +81,7 @@ public class YugiohController {
     public List<Card> getAllCards(){
         return yugiohService.getAllCards();
     }
-    //updates a cards weight
+    //updates a card weight
     @PutMapping("/card/update")
     public void updatingCards(
             @RequestHeader(value = IMPORT_TOKEN_HEADER, required = false) String providedToken
@@ -115,7 +118,8 @@ public class YugiohController {
     }
 
     public record ImportResult(int cardsAdded) {}
-    //imports new cards from the yugioh api database into the Neon database
+    //imports new cards from the yugioh api database into the Neon database and also evicts all caches in memory
+    @CacheEvict(value = {"Cards", "CardsBySubString", "Card"}, allEntries = true)
     @PostMapping("/admin/import")
     public ImportResult importNewCards(
             @RequestHeader(value = IMPORT_TOKEN_HEADER, required = false)
@@ -127,7 +131,6 @@ public class YugiohController {
 
     private void requireImportToken(String providedToken) {
         if (importToken.isBlank()
-                || providedToken == null
                 || !importToken.equals(providedToken)) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
                     "Invalid import token"

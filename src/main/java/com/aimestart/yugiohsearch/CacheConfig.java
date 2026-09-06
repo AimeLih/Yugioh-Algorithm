@@ -10,6 +10,6 @@ public class CacheConfig {
 
     @Bean
     public CacheManager cacheManager() {
-        return new ConcurrentMapCacheManager("Cards");
+        return new ConcurrentMapCacheManager("Cards", "CardsBySubString", "Card");
     }
 }
