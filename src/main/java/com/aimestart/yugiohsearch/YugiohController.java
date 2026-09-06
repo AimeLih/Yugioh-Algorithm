@@ -16,7 +16,7 @@ import org.springframework.web.server.ResponseStatusException;
 public class YugiohController {
 
     private static final String IMPORT_TOKEN_HEADER = "X-Import-Token";
-
+    //Reads import token that was received from the render environment variables
     @Value("${import.token}")
     private String importToken;
 
