@@ -243,6 +243,10 @@ body { background: #060a12; }
 
 
 .wiki-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
   padding: 1.1rem 1.5rem;
   text-align: center;
   position: relative;
@@ -257,11 +261,49 @@ body { background: #060a12; }
 }
 
 .wiki-name {
+  flex: 1;
+  margin: 0;
   font-family: 'Cinzel', serif;
   font-size: 1.4rem;
   color: #fff;
   text-shadow: 1px 1px 8px rgba(0, 0, 0, 0.6);
   letter-spacing: 0.5px;
+}
+
+.card-placement-actions {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.5rem;
+}
+
+.card-placement-actions button {
+  min-height: 34px;
+  padding: 0.35rem 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.62);
+  border-radius: 6px;
+  background: rgba(5, 14, 24, 0.78);
+  color: #fff;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+}
+
+.card-placement-actions button:hover {
+  border-color: #fff;
+  background: rgba(12, 38, 48, 0.94);
+}
+
+.extra-deck-placement-hint {
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+  max-width: 180px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.72rem;
 }
 
 
@@ -1075,6 +1117,18 @@ body { background: #060a12; }
   color: #e1f1fc;
 }
 
+.sim-zone-card-actions .remove-zone-card {
+  margin-left: auto;
+  border-color: rgba(226, 93, 93, 0.48);
+  color: #ffabab;
+}
+
+.sim-zone-card-actions .remove-zone-card:hover {
+  border-color: #e25d5d;
+  background: rgba(226, 93, 93, 0.14);
+  color: #ffd0d0;
+}
+
 .sim-zone-empty.scale-slot {
   min-height: 38px;
   border: 1px dashed #37675f;
@@ -1266,6 +1320,98 @@ body { background: #060a12; }
 .extra-deck-requirement { color: #aabdd0; font-size: 0.76rem; }
 .extra-deck-legality { color: #78c9aa; font-size: 0.72rem; font-weight: 700; }
 .extra-deck-result.illegal .extra-deck-legality { color: #d19494; }
+
+.route-cost-picker {
+  border-color: #38688c;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(47, 112, 158, 0.17), transparent 42%),
+    #0b1420;
+}
+
+.route-cost-controls {
+  grid-template-columns: minmax(220px, 0.8fr) minmax(300px, 1.8fr);
+}
+
+.route-cost-control {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0.68rem 0.75rem;
+  border: 1px solid #304d67;
+  border-radius: 7px;
+  background: #0e1b2c;
+  color: #e4edf6;
+  font-size: 0.82rem;
+  letter-spacing: 0;
+  line-height: 1.25;
+  text-transform: none;
+}
+
+.route-cost-summary .route-cost-restriction {
+  color: #dda0a0;
+}
+
+.route-cost-results {
+  gap: 0.8rem;
+}
+
+.route-cost-slot {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.route-cost-slot-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.15rem 0.05rem;
+  color: #c6dcec;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 0.76rem;
+}
+
+.route-cost-slot-heading > span {
+  color: #8fc1e4;
+}
+
+.route-cost-result.selected {
+  border-color: #73c5a5;
+  background: linear-gradient(135deg, rgba(38, 110, 83, 0.28), #0e1b2b);
+}
+
+.route-cost-result:disabled {
+  cursor: default;
+}
+
+.route-cost-result.selected:disabled {
+  opacity: 1;
+}
+
+.route-cost-result .extra-deck-result-heading > span {
+  font-weight: 500;
+}
+
+.route-cost-picker .selected-materials {
+  padding: 0;
+}
+
+.route-cost-picker .selected-materials button {
+  border-color: #458a71;
+  background: rgba(38, 110, 83, 0.2);
+  color: #a9e6cf;
+}
+
+.route-cost-picker .material-result-cap {
+  border-color: #38546e;
+  background: rgba(47, 112, 158, 0.1);
+  color: #a9c7dc;
+}
+
+.route-cost-picker .material-confirm-btn {
+  border-color: #6aa9d4;
+  background: linear-gradient(135deg, #245f87, #3e8cba);
+  color: #f0f8ff;
+}
 
 .effect-picker h3 {
   margin: 0.2rem 0 0;
@@ -1657,6 +1803,7 @@ body { background: #060a12; }
   .app-main { padding: 1.25rem 1rem 3rem; }
   .search-btn { padding: 0.85rem 1.25rem; }
   .wiki-body { flex-direction: column; }
+  .wiki-banner { flex-direction: column; }
   .wiki-image-col { width: 100%; border-right: none; border-bottom: 1px solid #1c3350; }
   .wiki-image-frame { max-width: 220px; margin: 0 auto; }
   .wiki-row-label { width: 110px; font-size: 0.78rem; }
