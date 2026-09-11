@@ -408,6 +408,12 @@ public class YugiohService {
         List<String> relevantQuotedTerms = extractQuotedTerms(effectText).stream()
                 .filter(term -> !safeLower(term).equals(safeLower(source.getName())))
                 .collect(Collectors.toList());
+        String mentionedCardName = mentionedCardReference(effectText);
+        if (!mentionedCardName.isBlank()
+                && (safeLower(target.getName()).equals(safeLower(mentionedCardName))
+                || safeLower(target.getDescription()).contains(safeLower(mentionedCardName)))) {
+            return true;
+        }
         if (!relevantQuotedTerms.isEmpty()) {
             return relevantQuotedTerms.stream().anyMatch(term ->
                     safeLower(target.getName()).contains(safeLower(term))
@@ -995,6 +1001,18 @@ public class YugiohService {
             candidates.put(safeLower(card.getName()), card);
         }
 
+        String mentionedCardName = mentionedCardReference(effectText);
+        if (!mentionedCardName.isBlank()) {
+            Card namedCard = findBestCardMatch(mentionedCardName);
+            if (namedCard != null) {
+                candidates.putIfAbsent(safeLower(namedCard.getName()), namedCard);
+            }
+            for (Card candidate : cardRepository
+                    .findByTypeContainingIgnoreCaseAndDescriptionContainingIgnoreCase("monster", mentionedCardName)) {
+                candidates.putIfAbsent(safeLower(candidate.getName()), candidate);
+            }
+        }
+
         if (containsAny(effectText, "search", "add to your hand", "add 1")) {
             for (String quotedTerm : extractQuotedTerms(effectText)) {
                 if (quotedTerm.isBlank() || safeLower(quotedTerm).equals(safeLower(source.getName()))) {
@@ -1030,6 +1048,7 @@ public class YugiohService {
                 && containsAny(effectText, "spell & trap zone", "spell/trap zone");
         boolean sourceCanSummon = containsAny(
                 effectText,
+                "special summon",
                 "you can special summon",
                 "special summon 1",
                 "special summon that",
@@ -1040,12 +1059,25 @@ public class YugiohService {
         boolean sourceCanRecover = containsAny(effectText, "send to the graveyard", "discard", "banish this card", "recycle");
         boolean sourceCanSetBackrow = !placesContinuousBackrow
                 && containsAny(effectText, "set 1", "set it", "set this", "place 1", "place this card");
+        String mentionedCardName = mentionedCardReference(section.text());
 
         for (Card candidate : candidates) {
             String targetDescription = safeLower(candidate.getDescription());
             int score = 0;
             LinkedHashSet<String> reasons = new LinkedHashSet<>();
             LinkedHashSet<String> destinations = new LinkedHashSet<>();
+
+            if (!mentionedCardName.isBlank()
+                    && !isExtraDeckMonster(candidate)
+                    && safeLower(candidate.getType()).contains("monster")
+                    && (safeLower(candidate.getName()).equals(safeLower(mentionedCardName))
+                    || safeLower(candidate.getDescription()).contains(safeLower(mentionedCardName)))) {
+                score += 100;
+                reasons.add(candidate.getName().equalsIgnoreCase(mentionedCardName)
+                        ? "This is the specifically named monster"
+                        : "This monster mentions \"" + mentionedCardName + "\" in its card text");
+                destinations.add(sourceCanSummon ? "Monster Zone" : "Hand");
+            }
 
             if (placesPendulumFromDeck && isPendulumMonster(candidate)) {
                 score += 105;
@@ -1121,6 +1153,20 @@ public class YugiohService {
                 draft.reasons.add("Useful for follow-up after the first line");
             }
         }
+    }
+
+    private String mentionedCardReference(String effectText) {
+        Matcher directReference = Pattern.compile(
+                "monster\\s+that\\s+mentions\\s+\"([^\"]+)\"",
+                Pattern.CASE_INSENSITIVE).matcher(effectText);
+        if (directReference.find()) {
+            return directReference.group(1).trim();
+        }
+
+        Matcher pronounReference = Pattern.compile(
+                "\"([^\"]+)\"\\s*,?\\s*or\\s+(?:1\\s+)?monster\\s+that\\s+mentions\\s+(?:it|that card)",
+                Pattern.CASE_INSENSITIVE).matcher(effectText);
+        return pronounReference.find() ? pronounReference.group(1).trim() : "";
     }
 
     // Card and route classification heuristics
