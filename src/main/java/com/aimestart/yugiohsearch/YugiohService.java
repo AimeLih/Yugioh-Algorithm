@@ -18,9 +18,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 
@@ -32,6 +32,8 @@ public class YugiohService {
     private final RestClient restClient;
     private final CardRepository cardRepository;
 
+
+    // API and service result models
     public record CardInfoResponse(List<CardData> data) {}
 
     public record CardImage(@JsonProperty("image_url") String imageUrl) {}
@@ -63,6 +65,7 @@ public class YugiohService {
             String cost,
             boolean oncePerTurn
     ) {}
+
     public record FusionMaterialSlot(
             String requirement,
             int count,
@@ -75,6 +78,8 @@ public class YugiohService {
             List<FusionMaterialSlot> slots,
             List<String> restrictions
     ) {}
+
+    // Internal route-building models
 
     private static class ComboDraft {
         private final Card card;
@@ -91,12 +96,18 @@ public class YugiohService {
 
     private record EffectSection(String text, String sourceZone) {}
 
+    private record ParsedMaterialSlot(String requirement, int count) {}
+
+    // Construction
+
     public YugiohService(RestClient.Builder builder, CardRepository cardRepository) {
         this.restClient = builder.baseUrl(API_BASE_URL).build();
         this.cardRepository = cardRepository;
     }
 
-    public List<CardData> fetchallCards() {
+    // Card catalog synchronization
+
+    public List<CardData> fetchAllCards() {
         CardInfoResponse response = restClient.get()
                 .uri(uriBuilder -> uriBuilder
                         .path("/cardinfo.php")
@@ -111,7 +122,7 @@ public class YugiohService {
     }
 
     public void importAllCards() {
-        List<Card> cardsToSave = fetchallCards().stream()
+        List<Card> cardsToSave = fetchAllCards().stream()
                 .map(card -> new Card(card.name(), card.desc(), card.type(), 0))
                 .toList();
         cardRepository.saveAll(cardsToSave);
@@ -120,7 +131,7 @@ public class YugiohService {
 
     @Transactional
     public int importNewCards() {
-        return importNewCards(fetchallCards(), fetchStapleCardNames());
+        return importNewCards(fetchAllCards(), fetchStapleCardNames());
     }
 
     int importNewCards(List<CardData> apiCards, Set<String> stapleNames) {
@@ -142,7 +153,7 @@ public class YugiohService {
 
     public void updateExistingCardsWeight() {
         List<Card> cards = cardRepository.findAll();
-        Map<String, String> cardTypes = fetchallCards().stream()
+        Map<String, String> cardTypes = fetchAllCards().stream()
                 .collect(Collectors.toMap(CardData::name, CardData::type, (first, ignored) -> first));
 
         for (Card card : cards) {
@@ -152,6 +163,12 @@ public class YugiohService {
                 card.setWeight(weightForType(type));
             }
         }
+        cardRepository.saveAll(cards);
+    }
+
+    public void allCardWeightZero() {
+        List<Card> cards = cardRepository.findAll();
+        cards.forEach(card -> card.setWeight(0));
         cardRepository.saveAll(cards);
     }
 
@@ -176,13 +193,9 @@ public class YugiohService {
         return Collections.emptySet();
     }
 
-    public String getImage(Card card) {
-        return card.getCardImageUrl();
-    }
-
     public void updateExistingCards() {
         List<Card> cards = cardRepository.findAll();
-        Map<String, CardData> apiCards = fetchallCards().stream()
+        Map<String, CardData> apiCards = fetchAllCards().stream()
                 .collect(Collectors.toMap(CardData::name, Function.identity(), (first, ignored) -> first));
 
         Set<String> stapleNames = fetchStapleCardNames();
@@ -259,33 +272,86 @@ public class YugiohService {
         return name.toLowerCase(Locale.ROOT);
     }
 
+    // Card queries and text facts
+
     public List<Card> getAllCards() {
         return cardRepository.findAll();
     }
 
+    public Card getCardByName(String name) {
+        return cardRepository.getCardByName(name);
+    }
+
+    public List<Card> getCardsBySubstring(String name) {
+        List<Card> cards = cardRepository.findByNameContainingIgnoreCase(name);
+        if (cards.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No cards found with that name");
+        }
+        return cards;
+    }
+
+    public String getImage(Card card) {
+        return card.getCardImageUrl();
+    }
+
+    public String ifExtender(String focusedCard) {
+        Card card = requireCard(focusedCard);
+        String desc = safeLower(card.getDescription());
+        if (Pattern.compile("summon\\s+\\d+").matcher(desc).find()) {
+            return "summon extender";
+        }
+        if (Pattern.compile("add\\s+\\d+").matcher(desc).find()) {
+            return "add extender";
+        }
+        return "not an extender";
+    }
+
+    public String isOncePerTurn(String focusedCard) {
+        return oncePerTurnRule(requireCard(focusedCard));
+    }
+
+    // Combo search orchestration and rulebook filtering
+
     public List<ComboOption> getPossibleCombos(String cardName) {
-        return getPossibleCombos(cardName, null);
+        return getPossibleCombos(cardName, null, null);
     }
 
     public List<ComboOption> getPossibleCombos(String cardName, String zone) {
+        return getPossibleCombos(cardName, zone, null);
+    }
+
+    public List<ComboOption> getPossibleCombos(String cardName, String zone, String selectedEffect) {
         Card card = requireCard(cardName);
 
         String zoneLabel = normalizedZoneLabel(zone);
-        String description = zoneLabel.isBlank()
-                ? safeLower(card.getDescription())
+        String availableDescription = zoneLabel.isBlank()
+                ? safeLower(normalizeCardText(card.getDescription()))
                 : safeLower(effectTextForZone(card, zoneLabel));
-        if (!zoneLabel.isBlank() && description.isBlank()) {
+        if (!zoneLabel.isBlank() && availableDescription.isBlank()) {
             return Collections.emptyList();
         }
 
+        String normalizedEffect = safeLower(normalizeCardText(selectedEffect)).trim();
+        final String description;
+        if (!normalizedEffect.isBlank()) {
+            if (!availableDescription.contains(normalizedEffect)) {
+                throw new ResponseStatusException(
+                        HttpStatus.BAD_REQUEST,
+                        "Selected effect does not belong to this card or zone");
+            }
+            description = normalizedEffect;
+        } else {
+            description = availableDescription;
+        }
+
         List<ComboOption> fusionTargets = buildFusionSummonTargets(card, description, zoneLabel);
-        List<ComboOption> curated = zoneLabel.isBlank()
+        List<ComboOption> curated = zoneLabel.isBlank() && normalizedEffect.isBlank()
                 ? buildCuratedGuideCombos(card)
                 : Collections.emptyList();
         Map<String, ComboDraft> drafts = new LinkedHashMap<>();
 
         buildExplicitComboRoutes(card, description, drafts);
-        buildTextDrivenComboRoutes(card, description, drafts, zoneLabel);
+        buildTextDrivenComboRoutes(card, description, drafts, zoneLabel, !normalizedEffect.isBlank());
 
         List<ComboOption> options = drafts.values().stream()
                 .filter(draft -> draft.score > 0)
@@ -302,7 +368,7 @@ public class YugiohService {
                                 ? joinMetadata(draft.sourceZones, sourceZoneFor(card))
                                 : zoneLabel,
                         joinMetadata(draft.destinations, "Varies"),
-                        comboCostFor(card, draft.card),
+                        comboCostFor(card, draft.card, description),
                         hasOncePerTurnRestriction(draft.card)))
                 .collect(Collectors.toList());
 
@@ -369,17 +435,26 @@ public class YugiohService {
                 .find();
     }
 
-    public Card getCardByName(String name) {
-        return cardRepository.getCardByName(name);
-    }
+    // Selectable cost and Fusion Material planning
 
     public FusionMaterialPlan getFusionMaterialPlan(String sourceName, String targetName) {
+        return getFusionMaterialPlan(sourceName, targetName, null);
+    }
+
+    public FusionMaterialPlan getFusionMaterialPlan(
+            String sourceName,
+            String targetName,
+            String selectedEffect
+    ) {
         Card source = cardRepository.getCardByName(sourceName);
         Card target = cardRepository.getCardByName(targetName);
         if (source == null || target == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Fusion source or target card not found");
         }
-        if (!safeLower(source.getDescription()).contains("fusion summon") || !isFusionMonster(target)) {
+        String effectText = selectedEffect == null || selectedEffect.isBlank()
+                ? source.getDescription()
+                : selectedEffect;
+        if (!safeLower(effectText).contains("fusion summon") || !isFusionMonster(target)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "This route is not a Fusion Summon");
         }
 
@@ -404,23 +479,36 @@ public class YugiohService {
             restrictions.add(sourceRestriction);
         }
 
-        String action = extractFusionMaterialAction(source.getDescription());
+        String action = extractFusionMaterialAction(effectText);
         return new FusionMaterialPlan(
                 action.isBlank() ? "Use the selected cards as Fusion Material" : capitalize(action),
-                fusionMaterialSourceZones(source.getDescription()),
-                fusionMaterialDestination(source.getDescription()),
+                fusionMaterialSourceZones(effectText),
+                fusionMaterialDestination(effectText),
                 slots,
                 restrictions);
     }
 
     public FusionMaterialPlan getCardCostPlan(String sourceName, String targetName) {
+        return getCardCostPlan(sourceName, targetName, null);
+    }
+
+    public FusionMaterialPlan getCardCostPlan(
+            String sourceName,
+            String targetName,
+            String selectedEffect
+    ) {
         Card source = cardRepository.getCardByName(sourceName);
         Card target = cardRepository.getCardByName(targetName);
         if (source == null || target == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Cost source or target card not found");
         }
 
-        String cost = comboCostFor(source, target);
+        String cost = comboCostFor(
+                source,
+                target,
+                selectedEffect == null || selectedEffect.isBlank()
+                        ? source.getDescription()
+                        : selectedEffect);
         if (cost.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "This route has no selectable card cost");
         }
@@ -452,29 +540,7 @@ public class YugiohService {
                 Collections.emptyList());
     }
 
-    public List<Card> getCardsBySubstring(String name) {
-        List<Card> cards = cardRepository.findByNameContainingIgnoreCase(name);
-        if (cards.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No cards found with that name");
-        }
-        return cards;
-    }
-
-    public String ifExtender(String focusedcard) {
-        Card card = requireCard(focusedcard);
-        String desc = safeLower(card.getDescription());
-        if (Pattern.compile("summon\\s+\\d+").matcher(desc).find()) {
-            return "summon extender";
-        }
-        if (Pattern.compile("add\\s+\\d+").matcher(desc).find()) {
-            return "add extender";
-        }
-        return "not an extender";
-    }
-
-    public String isOncePerTurn(String focusedcard) {
-        return oncePerTurnRule(requireCard(focusedcard));
-    }
+    // Shared card lookup and restriction helpers
 
     private Card requireCard(String name) {
         Card card = cardRepository.getCardByName(name);
@@ -510,11 +576,7 @@ public class YugiohService {
         return !oncePerTurnRule(card).equals("Not once per turn");
     }
 
-    public void allCardWeightZero() {
-        List<Card> cards = cardRepository.findAll();
-        cards.forEach(card -> card.setWeight(0));
-        cardRepository.saveAll(cards);
-    }
+    // Fusion route discovery and material parsing
 
     private List<Card> getRelatedArchetypeCards(Card card) {
         if (card.getArchetype() == null || card.getArchetype().isBlank()) {
@@ -587,8 +649,6 @@ public class YugiohService {
         }
         return "";
     }
-
-    private record ParsedMaterialSlot(String requirement, int count) {}
 
     private List<ParsedMaterialSlot> parseFusionMaterialSlots(Card fusionMonster) {
         return Arrays.stream(fusionMaterialRequirement(fusionMonster).split("\\+"))
@@ -805,14 +865,18 @@ public class YugiohService {
     }
 
     private String comboCostFor(Card source, Card target) {
-        if (isFusionMonster(target) && safeLower(source.getDescription()).contains("fusion summon")) {
+        return comboCostFor(source, target, source.getDescription());
+    }
+
+    private String comboCostFor(Card source, Card target, String effectText) {
+        if (isFusionMonster(target) && safeLower(effectText).contains("fusion summon")) {
             return fusionSummonCost(source, target);
         }
 
         Matcher costClause = Pattern.compile(
                 "([^.;:]*\\b(?:discard|tribute|banish|send|pay|detach|destroy|shuffle)\\b[^;]*);",
                 Pattern.CASE_INSENSITIVE)
-                .matcher(normalizeCardText(source.getDescription()));
+                .matcher(normalizeCardText(effectText));
         return costClause.find() ? capitalize(costClause.group(1).trim()) : "";
     }
 
@@ -850,6 +914,8 @@ public class YugiohService {
         }
         return new ArrayList<>(merged.values());
     }
+
+    // Explicit and text-driven route extraction
 
     private void buildExplicitComboRoutes(Card card, String description, Map<String, ComboDraft> drafts) {
         List<Card> relatedCards = getRelatedArchetypeCards(card);
@@ -905,16 +971,19 @@ public class YugiohService {
             Card card,
             String description,
             Map<String, ComboDraft> drafts,
-            String sourceZoneOverride
+            String sourceZoneOverride,
+            boolean selectedEffectOnly
     ) {
         List<Card> candidates = getRelatedArchetypeCards(card);
         if (candidates.isEmpty()) {
             return;
         }
 
-        List<EffectSection> sections = sourceZoneOverride.isBlank()
+        List<EffectSection> sections = sourceZoneOverride.isBlank() && !selectedEffectOnly
                 ? splitEffectSections(card)
-                : List.of(new EffectSection(description, sourceZoneOverride));
+                : List.of(new EffectSection(
+                        description,
+                        sourceZoneOverride.isBlank() ? sourceZoneFor(card) : sourceZoneOverride));
         for (EffectSection section : sections) {
             buildTextDrivenRoutesForSection(card, section, candidates, drafts);
         }
@@ -933,9 +1002,20 @@ public class YugiohService {
         boolean placesPendulumFromDeck = effectText.contains("pendulum monster")
                 && effectText.contains("from your deck")
                 && effectText.contains("pendulum zone");
-        boolean sourceCanSummon = containsAny(effectText, "special summon", "normal summon", "tribute summon");
+        boolean placesContinuousBackrow = containsAny(effectText, "continuous trap", "continuous spell")
+                && containsAny(effectText, "spell & trap zone", "spell/trap zone");
+        boolean sourceCanSummon = containsAny(
+                effectText,
+                "you can special summon",
+                "special summon 1",
+                "special summon that",
+                "special summon it",
+                "special summon this card",
+                "normal summon",
+                "tribute summon");
         boolean sourceCanRecover = containsAny(effectText, "send to the graveyard", "discard", "banish this card", "recycle");
-        boolean sourceCanSetBackrow = containsAny(effectText, "set 1", "set it", "set this");
+        boolean sourceCanSetBackrow = !placesContinuousBackrow
+                && containsAny(effectText, "set 1", "set it", "set this", "place 1", "place this card");
 
         for (Card candidate : candidates) {
             String targetDescription = safeLower(candidate.getDescription());
@@ -947,6 +1027,14 @@ public class YugiohService {
                 score += 105;
                 reasons.add(card.getName() + " can place this card from the Deck");
                 destinations.add("Pendulum Zone");
+            }
+
+            if (placesContinuousBackrow && safeLower(candidate.getType()).contains("monster")) {
+                score += 105;
+                reasons.add(card.getName() + " can place this monster as a face-up Continuous Spell/Trap");
+                destinations.add(effectText.contains("continuous spell")
+                        ? "Spell & Trap Zone as Continuous Spell"
+                        : "Spell & Trap Zone as Continuous Trap");
             }
 
             if (searchesMainDeck && isLegalMainDeckSearchTarget(effectText, candidate)) {
@@ -1010,6 +1098,8 @@ public class YugiohService {
             }
         }
     }
+
+    // Card and route classification heuristics
 
     private boolean isSpellOrTrap(Card card) {
         String type = safeLower(card.getType());
@@ -1152,6 +1242,8 @@ public class YugiohService {
         return false;
     }
 
+    // Effect text, timing, and zone metadata
+
     private List<EffectSection> splitEffectSections(Card card) {
         String text = normalizeCardText(card.getDescription());
         if (!isPendulumMonster(card)) {
@@ -1262,6 +1354,12 @@ public class YugiohService {
 
     private String destinationForEffect(String effectText, Card target) {
         String text = safeLower(effectText);
+        if (containsAny(text, "spell & trap zone", "spell/trap zone") && text.contains("continuous trap")) {
+            return "Spell & Trap Zone as Continuous Trap";
+        }
+        if (containsAny(text, "spell & trap zone", "spell/trap zone") && text.contains("continuous spell")) {
+            return "Spell & Trap Zone as Continuous Spell";
+        }
         if (text.contains("pendulum zone") && isPendulumMonster(target)) {
             return "Pendulum Zone";
         }
@@ -1302,6 +1400,8 @@ public class YugiohService {
     private String safeLower(String value) {
         return value == null ? "" : value.toLowerCase();
     }
+
+    // Candidate matching, scoring, and result assembly
 
     private List<String> extractQuotedTerms(String text) {
         if (text == null || text.isBlank()) {
@@ -1378,6 +1478,8 @@ public class YugiohService {
         }
         return "extender";
     }
+
+    // Curated archetype routes
 
     private List<ComboOption> buildCuratedGuideCombos(Card card) {
         List<ComboOption> options = new ArrayList<>();
