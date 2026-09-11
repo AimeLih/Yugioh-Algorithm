@@ -59,10 +59,6 @@ function emptyZones() {
   }
 }
 
-function initialZoneForCard(card) {
-  return /(spell|trap)/i.test(card.type || '') ? 'spellTrapZone' : 'monsterZone'
-}
-
 function isTokenCard(card) {
   const type = (card.type || '').toLowerCase()
   return type.includes('token') || /\btoken\b/i.test(card.name || '')
@@ -997,6 +993,7 @@ function CardDetail({
   onOpenExtraDeckSummon,
   onOpenPendulumSummon,
   onMoveCard,
+  onClearZones,
 }) {
   const color = typeColor(card.type)
   const t = (card.type || '').toLowerCase()
@@ -1215,8 +1212,9 @@ function CardDetail({
               )}
             </div>
 
-            <div className="wiki-section-header zone-section-header">
-              Current Field &amp; Other Zones
+            <div className="wiki-section-header zone-section-header zone-section-heading-row">
+              <span>Current Field &amp; Other Zones</span>
+              <button type="button" className="clear-zones-btn" onClick={onClearZones}>Clear Zones</button>
             </div>
             <SimulatedZones
                 zones={zones}
@@ -1349,19 +1347,34 @@ export default function App() {
   }
 
   async function openRootCard(card) {
-    const rootEntry = zoneEntry(card)
-    const rootZone = initialZoneForCard(card)
+    const rootEntry = zoneEntry(card, 'added-to-hand')
     setSelected(card)
     setSelectedEntry(rootEntry)
     setComboPath([card])
     setComboOptions([])
-    setZones({ ...emptyZones(), [rootZone]: [rootEntry] })
-    setComboHistory([])
-    setActivatedEffects([])
-    setActiveZoneContext(rootZone)
+    setZones(previous => ({ ...previous, hand: [...previous.hand, rootEntry] }))
+    setActiveZoneContext('hand')
     setActiveEffect(null)
     setEffectSelection(null)
     setSummonEffectQueue([])
+    setExtraDeckPickerOpen(false)
+    setPendulumPickerOpen(false)
+    closeMaterialPicker()
+    setError(null)
+    await fetchCardExtras(card)
+  }
+
+  function clearZones() {
+    setZones(emptyZones())
+    setComboHistory([])
+    setActivatedEffects([])
+    setActiveZoneContext(null)
+    setSelectedEntry(null)
+    setActiveEffect(null)
+    setEffectSelection(null)
+    setSummonEffectQueue([])
+    setComboOptions([])
+    setComboPath(selected ? [selected] : [])
     setExtraDeckPickerOpen(false)
     setPendulumPickerOpen(false)
     setLastPendulumSummonTurn(null)
@@ -1369,10 +1382,7 @@ export default function App() {
     setPhase('Main Phase')
     setActiveCardTurn(1)
     closeMaterialPicker()
-    if (rootZone === 'monsterZone' && isMonsterCard(card)) {
-      promptOnSummonEffects(card, rootEntry)
-    }
-    await fetchCardExtras(card)
+    setError(null)
   }
 
   function promptOnSummonEffects(card, entry) {
@@ -1769,6 +1779,10 @@ export default function App() {
   }
 
   async function requestEffectActivation(entry = selectedEntry, zone = activeZoneContext) {
+    if (!entry || !zone) {
+      setError('Place the card in a zone before activating one of its effects.')
+      return
+    }
     const card = entry?.card ?? selected
     if (!card) return
     const resolvedEntry = entry ?? { instanceId: `card-${card.id ?? card.name}`, card, moveReason: 'selected' }
@@ -1868,27 +1882,6 @@ export default function App() {
     setLoading(true)
     setError(null)
     setCards([])
-    setSelected(null)
-    setOncePerTurn(null)
-    setExtender(null)
-    setComboPath([])
-    setComboOptions([])
-    setComboLoading(false)
-    setZones(emptyZones())
-    setComboHistory([])
-    setActivatedEffects([])
-    setActiveZoneContext(null)
-    setSelectedEntry(null)
-    setActiveEffect(null)
-    setEffectSelection(null)
-    setSummonEffectQueue([])
-    setExtraDeckPickerOpen(false)
-    setPendulumPickerOpen(false)
-    setLastPendulumSummonTurn(null)
-    setCurrentTurn(1)
-    setPhase('Main Phase')
-    setActiveCardTurn(1)
-    closeMaterialPicker()
 
     try {
       if (mode === 'exact') {
@@ -2012,6 +2005,7 @@ export default function App() {
                           onOpenExtraDeckSummon={() => setExtraDeckPickerOpen(true)}
                           onOpenPendulumSummon={openPendulumSummonPicker}
                           onMoveCard={moveZoneCard}
+                          onClearZones={clearZones}
                       />
                   ) : !error && cards.length === 0 && (
                       <div className="empty-state">

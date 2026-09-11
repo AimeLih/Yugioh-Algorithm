@@ -767,6 +767,32 @@ body { background: #060a12; }
   background: linear-gradient(90deg, #173550, #203d37);
 }
 
+.zone-section-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.clear-zones-btn {
+  padding: 0.3rem 0.6rem;
+  border: 1px solid rgba(255, 214, 189, 0.5);
+  border-radius: 5px;
+  background: rgba(82, 31, 29, 0.72);
+  color: #ffd7c7;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.45px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.clear-zones-btn:hover {
+  border-color: #efaa8d;
+  background: #713a32;
+}
+
 .simulated-zones {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
