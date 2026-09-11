@@ -37,6 +37,7 @@ function Badge({ label, color }) {
 
 const ZONE_KEYS = [
   'monsterZone',
+  'extraMonsterZone',
   'spellTrapZone',
   'pendulumZone',
   'hand',
@@ -48,6 +49,7 @@ const ZONE_KEYS = [
 function emptyZones() {
   return {
     monsterZone: [],
+    extraMonsterZone: [],
     spellTrapZone: [],
     pendulumZone: [],
     hand: [],
@@ -68,6 +70,77 @@ function isTokenCard(card) {
 
 function isMonsterCard(card) {
   return /monster/i.test(card.type || '') || isTokenCard(card)
+}
+
+function isPendulumMonster(card) {
+  return isMonsterCard(card) && /pendulum/i.test(card.type || '')
+}
+
+function pendulumScaleRange(zones) {
+  if (zones.pendulumZone.length !== 2) return null
+  const scales = zones.pendulumZone.map(entry => Number(entry.card.scale))
+  if (scales.some(scale => !Number.isFinite(scale))) return null
+  return { low: Math.min(...scales), high: Math.max(...scales) }
+}
+
+function linkedMainZoneCapacity(zones) {
+  const normalizedMarkers = entry => (entry.card.linkmarkers || [])
+      .map(marker => marker.toLowerCase().replace(/[_\s]/g, '-'))
+  const fromExtraZone = zones.extraMonsterZone
+      .filter(entry => extraDeckKind(entry.card) === 'Link')
+      .flatMap(normalizedMarkers)
+      .filter(marker => ['bottom-left', 'bottom', 'bottom-right'].includes(marker)).length
+  const fromMainZones = zones.monsterZone
+      .filter(entry => extraDeckKind(entry.card) === 'Link')
+      .flatMap(normalizedMarkers)
+      .filter(marker => ['left', 'right'].includes(marker)).length
+  return Math.min(5 - zones.monsterZone.length, fromExtraZone + fromMainZones)
+}
+
+function allowedByPendulumScaleEffects(entry, zones) {
+  return zones.pendulumZone.every(scaleEntry => {
+    const pendulumText = normalizeEffectText(scaleEntry.card.description).split(/\[?\s*monster effect\s*\]?/i)[0]
+    const restriction = pendulumText.match(/cannot pendulum summon monsters,? except ([^.]+)/i)?.[1]
+    if (!restriction) return true
+    const quotedFamilies = [...restriction.matchAll(/"([^"]+)"/g)].map(match => match[1].toLowerCase())
+    if (quotedFamilies.length === 0) return true
+    const name = (entry.card.name || '').toLowerCase()
+    const archetype = (entry.card.archetype || '').toLowerCase()
+    return quotedFamilies.some(family => name.includes(family) || archetype.includes(family))
+  })
+}
+
+function canPendulumSummonFromFaceUpExtra(entry) {
+  const type = (entry.card.type || '').toLowerCase()
+  const isHybridExtraDeckMonster = /(fusion|synchro|xyz|link)/.test(type)
+  return !isHybridExtraDeckMonster
+      || /(?:can|must) be pendulum summoned|pendulum summon this face-up card/i.test(entry.card.description || '')
+}
+
+function hasBlockingSpecialSummonCondition(entry) {
+  const description = (entry.card.description || '').toLowerCase()
+  if (!description.includes('cannot be special summoned')) return false
+  return !/can be pendulum summoned|must be pendulum summoned/.test(description)
+}
+
+function pendulumEligibleEntries(zones) {
+  const range = pendulumScaleRange(zones)
+  if (!range || range.low === range.high) return []
+  const inRange = entry => {
+    const level = Number(entry.card.level)
+    return isMonsterCard(entry.card)
+        && Number.isFinite(level)
+        && level > range.low
+        && level < range.high
+        && !hasBlockingSpecialSummonCondition(entry)
+        && allowedByPendulumScaleEffects(entry, zones)
+  }
+  return [
+    ...zones.hand.filter(inRange).map(entry => ({ ...entry, pendulumSource: 'hand' })),
+    ...zones.extraDeck
+        .filter(entry => isPendulumMonster(entry.card) && canPendulumSummonFromFaceUpExtra(entry) && inRange(entry))
+        .map(entry => ({ ...entry, pendulumSource: 'extraDeck' })),
+  ]
 }
 
 function extraDeckKind(card) {
@@ -229,6 +302,7 @@ function findLegalExtraDeckMaterials(target, fieldEntries) {
 function displayZoneName(zone) {
   return {
     monsterZone: 'Monster Zone',
+    extraMonsterZone: 'Extra Monster Zone',
     spellTrapZone: 'Spell & Trap Zone',
     pendulumZone: 'Pendulum Zone',
     hand: 'Hand',
@@ -292,7 +366,7 @@ function cardEffectOptions(card, zone = null, entry = null) {
     const source = effect.sourceZone.toLowerCase()
     if (zone === 'graveyard') return source === 'graveyard'
     if (zone === 'banished') return source === 'banished'
-    if (zone === 'monsterZone') return source.includes('monster zone') || source.includes('hand')
+    if (zone === 'monsterZone' || zone === 'extraMonsterZone') return source.includes('monster zone') || source.includes('hand')
     if (zone === 'hand') return source.includes('hand') && !isOnSummonEffect(effect)
     if (zone === 'pendulumZone') return source.includes('pendulum zone')
     if (zone === 'spellTrapZone') {
@@ -346,9 +420,17 @@ function canActivateFromZone(entry, zone) {
   return cardEffectOptions(entry.card, zone, entry).length > 0
 }
 
-function SimulatedZones({ zones, activatedEffects, onRequestEffect, onOpenExtraDeckSummon, onMoveCard }) {
+function SimulatedZones({
+  zones,
+  activatedEffects,
+  onRequestEffect,
+  onOpenExtraDeckSummon,
+  onOpenPendulumSummon,
+  onMoveCard,
+}) {
   const zoneDefinitions = [
     { key: 'monsterZone', label: 'Monsters' },
+    { key: 'extraMonsterZone', label: 'Extra Monster Zone' },
     { key: 'spellTrapZone', label: 'Spells & Traps' },
     { key: 'pendulumZone', label: 'Pendulum Zones' },
     { key: 'hand', label: 'Hand' },
@@ -367,6 +449,11 @@ function SimulatedZones({ zones, activatedEffects, onRequestEffect, onOpenExtraD
                   {zone.key === 'monsterZone' && (
                       <button type="button" className="extra-deck-summon-btn" onClick={onOpenExtraDeckSummon}>
                         Synchro / Xyz / Link
+                      </button>
+                  )}
+                  {zone.key === 'pendulumZone' && (
+                      <button type="button" className="pendulum-summon-btn" onClick={onOpenPendulumSummon}>
+                        Pendulum Summon
                       </button>
                   )}
                   <span className="sim-zone-count">{zones[zone.key].length}</span>
@@ -399,7 +486,7 @@ function SimulatedZones({ zones, activatedEffects, onRequestEffect, onOpenExtraD
                               : 'This card has no effect that activates from this zone'}
                         >
                           <span className="sim-zone-card-name">{entry.card.name}</span>
-                          {zone.key === 'monsterZone' && isMonsterCard(entry.card) && (
+                          {['monsterZone', 'extraMonsterZone'].includes(zone.key) && isMonsterCard(entry.card) && (
                               <span className="sim-zone-monster-stats">
                                 {extraDeckKind(entry.card) === 'Link'
                                   ? `LINK-${entry.card.linkvalue ?? '?'}`
@@ -416,7 +503,7 @@ function SimulatedZones({ zones, activatedEffects, onRequestEffect, onOpenExtraD
                           )}
                         </button>
                         <div className="sim-zone-card-actions">
-                          {['monsterZone', 'spellTrapZone', 'pendulumZone'].includes(zone.key)
+                          {['monsterZone', 'extraMonsterZone', 'spellTrapZone', 'pendulumZone'].includes(zone.key)
                               && !isTokenCard(entry.card)
                               && !extraDeckKind(entry.card) && (
                               <button type="button" onClick={() => onMoveCard(entry, zone.key, 'hand')}>To Hand</button>
@@ -437,6 +524,85 @@ function SimulatedZones({ zones, activatedEffects, onRequestEffect, onOpenExtraD
               </div>
             </section>
         ))}
+      </div>
+  )
+}
+
+function PendulumSummonPicker({ zones, onSummon, onCancel }) {
+  const [selectedIds, setSelectedIds] = useState([])
+  const range = pendulumScaleRange(zones)
+  const eligible = pendulumEligibleEntries(zones)
+  const mainOpen = 5 - zones.monsterZone.length
+  const extraMonsterOpen = zones.extraMonsterZone.length === 0 ? 1 : 0
+  const linkedOpen = linkedMainZoneCapacity(zones)
+  const selected = eligible.filter(entry => selectedIds.includes(entry.instanceId))
+  const selectedFromExtra = selected.filter(entry => entry.pendulumSource === 'extraDeck').length
+  const selectedFromHand = selected.length - selectedFromExtra
+  const selectionFits = selectedFromExtra <= extraMonsterOpen + linkedOpen
+      && selectedFromHand + Math.max(0, selectedFromExtra - extraMonsterOpen) <= mainOpen
+
+  function toggle(entry) {
+    setSelectedIds(current => current.includes(entry.instanceId)
+      ? current.filter(id => id !== entry.instanceId)
+      : [...current, entry.instanceId])
+  }
+
+  return (
+      <div className="material-picker-backdrop" role="presentation">
+        <section className="pendulum-summon-picker" role="dialog" aria-modal="true" aria-labelledby="pendulum-summon-title">
+          <div className="material-picker-header">
+            <div>
+              <div className="material-picker-kicker">Once Per Turn · Main Phase</div>
+              <h3 id="pendulum-summon-title">Pendulum Summon</h3>
+            </div>
+            <button type="button" className="material-picker-close" onClick={onCancel}>Close</button>
+          </div>
+
+          <div className="pendulum-scale-summary">
+            {range
+              ? <><strong>Scales {range.low} and {range.high}</strong><span>Eligible Levels: {range.low + 1}–{range.high - 1}</span></>
+              : <span>Place two Pendulum Monsters with valid scales before Pendulum Summoning.</span>}
+          </div>
+          <div className="pendulum-capacity-summary">
+            <span>{mainOpen} open Main Monster Zone{mainOpen === 1 ? '' : 's'}</span>
+            <span>{extraMonsterOpen} open Extra Monster Zone</span>
+            <span>{linkedOpen} open linked Main Monster Zone{linkedOpen === 1 ? '' : 's'}</span>
+          </div>
+
+          <div className="pendulum-summon-options">
+            {eligible.length === 0 ? (
+                <div className="material-no-results">No monsters in your Hand or face-up Extra Deck have a Level between the scales.</div>
+            ) : eligible.map(entry => {
+              const checked = selectedIds.includes(entry.instanceId)
+              return (
+                  <label key={entry.instanceId} className={`pendulum-summon-option${checked ? ' selected' : ''}`}>
+                    <input type="checkbox" checked={checked} onChange={() => toggle(entry)} />
+                    <span>
+                      <strong>{entry.card.name}</strong>
+                      <small>Level {entry.card.level} · From {entry.pendulumSource === 'hand' ? 'Hand' : 'face-up Extra Deck'}</small>
+                    </span>
+                  </label>
+              )
+            })}
+          </div>
+
+          {!selectionFits && (
+              <div className="material-picker-error">
+                Face-up Extra Deck monsters require an open Extra Monster Zone or a Main Monster Zone a Link Monster points to.
+              </div>
+          )}
+          <div className="pendulum-summon-footer">
+            <span>{selected.length} selected</span>
+            <button
+                type="button"
+                className="pendulum-summon-confirm"
+                disabled={selected.length === 0 || !selectionFits}
+                onClick={() => onSummon(selected)}
+            >
+              Pendulum Summon
+            </button>
+          </div>
+        </section>
       </div>
   )
 }
@@ -530,7 +696,8 @@ function ExtraDeckSummonPicker({ zones, onSummon, onCancel }) {
     }
   }, [kind, search])
 
-  const availableMaterials = zones.monsterZone.filter(entry => isMonsterCard(entry.card))
+  const availableMaterials = [...zones.monsterZone, ...zones.extraMonsterZone]
+      .filter(entry => isMonsterCard(entry.card))
 
   return (
       <div className="material-picker-backdrop" role="presentation">
@@ -828,6 +995,7 @@ function CardDetail({
   activeCardTurn,
   onAdvancePhase,
   onOpenExtraDeckSummon,
+  onOpenPendulumSummon,
   onMoveCard,
 }) {
   const color = typeColor(card.type)
@@ -1055,6 +1223,7 @@ function CardDetail({
                 activatedEffects={activatedEffects}
                 onRequestEffect={onRequestEffect}
                 onOpenExtraDeckSummon={onOpenExtraDeckSummon}
+                onOpenPendulumSummon={onOpenPendulumSummon}
                 onMoveCard={onMoveCard}
             />
           </div>
@@ -1097,6 +1266,7 @@ export default function App() {
   const [selectedEntry, setSelectedEntry] = useState(null)
   const [activeEffect, setActiveEffect] = useState(null)
   const [effectSelection, setEffectSelection] = useState(null)
+  const [, setSummonEffectQueue] = useState([])
   const [currentTurn, setCurrentTurn] = useState(1)
   const [phase, setPhase] = useState('Main Phase')
   const [activeCardTurn, setActiveCardTurn] = useState(1)
@@ -1107,6 +1277,8 @@ export default function App() {
   const [materialLoading, setMaterialLoading] = useState(false)
   const [materialError, setMaterialError] = useState(null)
   const [extraDeckPickerOpen, setExtraDeckPickerOpen] = useState(false)
+  const [pendulumPickerOpen, setPendulumPickerOpen] = useState(false)
+  const [lastPendulumSummonTurn, setLastPendulumSummonTurn] = useState(null)
   const [comboLoading, setComboLoading] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -1128,6 +1300,7 @@ export default function App() {
       currentTurn,
       phase,
       activeCardTurn,
+      lastPendulumSummonTurn,
     }
   }
 
@@ -1188,7 +1361,10 @@ export default function App() {
     setActiveZoneContext(rootZone)
     setActiveEffect(null)
     setEffectSelection(null)
+    setSummonEffectQueue([])
     setExtraDeckPickerOpen(false)
+    setPendulumPickerOpen(false)
+    setLastPendulumSummonTurn(null)
     setCurrentTurn(1)
     setPhase('Main Phase')
     setActiveCardTurn(1)
@@ -1210,6 +1386,16 @@ export default function App() {
       effects,
       automatic: true,
     })
+  }
+
+  function promptSimultaneousSummonEffects(entries) {
+    const triggered = entries.flatMap(entry => {
+      const effects = onSummonEffectOptions(entry.card, entry)
+      return effects.length > 0 ? [{ card: entry.card, entry, zone: 'monsterZone', effects, automatic: true }] : []
+    })
+    if (triggered.length === 0) return
+    setEffectSelection(triggered[0])
+    setSummonEffectQueue(triggered.slice(1))
   }
 
   function moveZoneCard(entry, fromZone, toZone) {
@@ -1259,7 +1445,7 @@ export default function App() {
   }
 
   async function performExtraDeckSummon(card, materials) {
-    const legalMaterials = findLegalExtraDeckMaterials(card, zones.monsterZone)
+    const legalMaterials = findLegalExtraDeckMaterials(card, [...zones.monsterZone, ...zones.extraMonsterZone])
     const selectedIds = new Set(materials.map(entry => entry.instanceId))
     const stillLegal = legalMaterials
         && legalMaterials.length === materials.length
@@ -1278,6 +1464,7 @@ export default function App() {
     setZones(prev => {
       const next = Object.fromEntries(ZONE_KEYS.map(zoneName => [zoneName, [...prev[zoneName]]]))
       next.monsterZone = next.monsterZone.filter(entry => !selectedIds.has(entry.instanceId))
+      next.extraMonsterZone = next.extraMonsterZone.filter(entry => !selectedIds.has(entry.instanceId))
       for (const material of materials) {
         for (const overlay of material.overlayMaterials || []) {
           if (!isTokenCard(overlay.card)) {
@@ -1307,6 +1494,81 @@ export default function App() {
     setError(null)
     promptOnSummonEffects(card, summonedEntry)
     await fetchCardExtras(card)
+  }
+
+  function openPendulumSummonPicker() {
+    if (phase !== 'Main Phase') {
+      setError('You can only Pendulum Summon during your Main Phase.')
+      return
+    }
+    if (lastPendulumSummonTurn === currentTurn) {
+      setError('You have already Pendulum Summoned this turn.')
+      return
+    }
+    const range = pendulumScaleRange(zones)
+    if (!range) {
+      setError('Place two Pendulum Monsters with valid scales first.')
+      return
+    }
+    if (range.low === range.high) {
+      setError('Matching scales do not create a Level range for a Pendulum Summon.')
+      return
+    }
+    setError(null)
+    setPendulumPickerOpen(true)
+  }
+
+  function performPendulumSummon(entries) {
+    const eligible = pendulumEligibleEntries(zones)
+    const eligibleById = new Map(eligible.map(entry => [entry.instanceId, entry]))
+    const chosen = entries.map(entry => eligibleById.get(entry.instanceId)).filter(Boolean)
+    if (chosen.length !== entries.length || chosen.length === 0 || lastPendulumSummonTurn === currentTurn) {
+      setError('The selected Pendulum Summon is no longer legal.')
+      return
+    }
+
+    const fromExtra = chosen.filter(entry => entry.pendulumSource === 'extraDeck')
+    const fromHand = chosen.filter(entry => entry.pendulumSource === 'hand')
+    const mainOpen = 5 - zones.monsterZone.length
+    const extraMonsterOpen = zones.extraMonsterZone.length === 0 ? 1 : 0
+    const linkedOpen = linkedMainZoneCapacity(zones)
+    if (fromExtra.length > extraMonsterOpen + linkedOpen
+        || fromHand.length + Math.max(0, fromExtra.length - extraMonsterOpen) > mainOpen) {
+      setError('There are not enough legal Monster Zones for that Pendulum Summon.')
+      return
+    }
+
+    const chosenIds = new Set(chosen.map(entry => entry.instanceId))
+    const extraZoneSummons = extraMonsterOpen ? fromExtra.slice(0, 1) : []
+    const extraZoneIds = new Set(extraZoneSummons.map(entry => entry.instanceId))
+    const summonedEntries = chosen.map(entry => ({
+      ...entry,
+      pendulumSource: undefined,
+      moveReason: 'pendulum-summon',
+      treatedAs: null,
+      overlayMaterials: [],
+    }))
+
+    setComboHistory(prev => [...prev, snapshotComboState()])
+    setZones(prev => {
+      const next = Object.fromEntries(ZONE_KEYS.map(zoneName => [zoneName, [...prev[zoneName]]]))
+      next.hand = next.hand.filter(entry => !chosenIds.has(entry.instanceId))
+      next.extraDeck = next.extraDeck.filter(entry => !chosenIds.has(entry.instanceId))
+      next.extraMonsterZone.push(...summonedEntries.filter(entry => extraZoneIds.has(entry.instanceId)))
+      next.monsterZone.push(...summonedEntries.filter(entry => !extraZoneIds.has(entry.instanceId)))
+      return next
+    })
+    setLastPendulumSummonTurn(currentTurn)
+    setPendulumPickerOpen(false)
+    setError(null)
+    const lastSummoned = summonedEntries.at(-1)
+    setSelected(lastSummoned.card)
+    setSelectedEntry(lastSummoned)
+    setActiveZoneContext(extraZoneIds.has(lastSummoned.instanceId) ? 'extraMonsterZone' : 'monsterZone')
+    setActiveCardTurn(currentTurn)
+    setComboOptions([])
+    setActiveEffect(null)
+    promptSimultaneousSummonEffects(summonedEntries)
   }
 
   async function finishComboChoice(
@@ -1525,6 +1787,12 @@ export default function App() {
 
   function closeEffectPicker() {
     setEffectSelection(null)
+    setSummonEffectQueue(queue => {
+      if (queue.length === 0) return queue
+      const [next, ...remaining] = queue
+      setEffectSelection(next)
+      return remaining
+    })
   }
 
   async function chooseEffect(effect) {
@@ -1585,9 +1853,12 @@ export default function App() {
     setCurrentTurn(previousState.currentTurn)
     setPhase(previousState.phase)
     setActiveCardTurn(previousState.activeCardTurn)
+    setLastPendulumSummonTurn(previousState.lastPendulumSummonTurn)
     closeEffectPicker()
+    setSummonEffectQueue([])
     closeMaterialPicker()
     setExtraDeckPickerOpen(false)
+    setPendulumPickerOpen(false)
     await fetchCardExtras(previousState.selected)
   }
 
@@ -1610,7 +1881,10 @@ export default function App() {
     setSelectedEntry(null)
     setActiveEffect(null)
     setEffectSelection(null)
+    setSummonEffectQueue([])
     setExtraDeckPickerOpen(false)
+    setPendulumPickerOpen(false)
+    setLastPendulumSummonTurn(null)
     setCurrentTurn(1)
     setPhase('Main Phase')
     setActiveCardTurn(1)
@@ -1736,6 +2010,7 @@ export default function App() {
                           activeCardTurn={activeCardTurn}
                           onAdvancePhase={advancePhase}
                           onOpenExtraDeckSummon={() => setExtraDeckPickerOpen(true)}
+                          onOpenPendulumSummon={openPendulumSummonPicker}
                           onMoveCard={moveZoneCard}
                       />
                   ) : !error && cards.length === 0 && (
@@ -1773,6 +2048,13 @@ export default function App() {
                 zones={zones}
                 onSummon={performExtraDeckSummon}
                 onCancel={() => setExtraDeckPickerOpen(false)}
+            />
+        )}
+        {pendulumPickerOpen && (
+            <PendulumSummonPicker
+                zones={zones}
+                onSummon={performPendulumSummon}
+                onCancel={() => setPendulumPickerOpen(false)}
             />
         )}
       </div>
