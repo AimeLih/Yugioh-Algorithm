@@ -121,6 +121,15 @@ function effectUsageKey(entry, effect) {
   return `${entry?.instanceId ?? entry?.card?.id ?? 'card'}:${effect.text.toLowerCase()}`
 }
 
+function isOnSummonEffect(effect) {
+  return /\b(?:if|when) this card (?:is|was) (?:normal or special |normal |special |tribute |flip |ritual |fusion |synchro |xyz |link |pendulum )?summoned\b/i
+      .test(effect.text)
+}
+
+function onSummonEffectOptions(card, entry) {
+  return cardEffectOptions(card, 'monsterZone', entry).filter(isOnSummonEffect)
+}
+
 function canActivateFromZone(entry, zone) {
   const text = (entry.card.description || '').toLowerCase()
   const reason = entry.moveReason || ''
@@ -214,12 +223,18 @@ function EffectPicker({ selection, activatedEffects, onChoose, onCancel }) {
         <section className="effect-picker" role="dialog" aria-modal="true" aria-labelledby="effect-picker-title">
           <div className="material-picker-header">
             <div>
-              <div className="material-picker-kicker">Activate Card Effect</div>
+              <div className="material-picker-kicker">
+                {selection.automatic ? 'Summon Effect Triggered' : 'Activate Card Effect'}
+              </div>
               <h3 id="effect-picker-title">{selection.card.name}</h3>
             </div>
             <button type="button" className="material-picker-close" onClick={onCancel}>Close</button>
           </div>
-          <div className="effect-picker-copy">Choose the exact effect you want to activate.</div>
+          <div className="effect-picker-copy">
+            {selection.automatic
+              ? 'This card was summoned. Choose which on-summon effect you want to resolve.'
+              : 'Choose the exact effect you want to activate.'}
+          </div>
           <div className="effect-picker-options">
             {selection.effects.map((effect, index) => {
               const used = activatedEffects.includes(effectUsageKey(selection.entry, effect))
@@ -309,7 +324,7 @@ function MaterialPicker({
           </div>
 
           {loading ? (
-              <div className="material-picker-status">Finding legal Fusion Materials...</div>
+              <div className="material-picker-status">Finding legal materials...</div>
           ) : error ? (
               <div className="material-picker-error">{error}</div>
           ) : materialPlan && (
@@ -819,6 +834,19 @@ export default function App() {
     await fetchCardExtras(card)
   }
 
+  function promptOnSummonEffects(card, entry) {
+    if (!entry) return
+    const effects = onSummonEffectOptions(card, entry)
+    if (effects.length === 0) return
+    setEffectSelection({
+      card,
+      entry,
+      zone: 'monsterZone',
+      effects,
+      automatic: true,
+    })
+  }
+
   async function finishComboChoice(
       option,
       paidMaterials = [],
@@ -839,7 +867,9 @@ export default function App() {
         : destination.includes('pendulum zone')
           ? 'Pendulum Card'
           : null
-    const destinationEntry = destinationZone ? zoneEntry(card, 'effect-resolution', treatedAs) : null
+    const destinationEntry = destinationZone
+      ? zoneEntry(card, destinationZone === 'monsterZone' ? 'summoned' : 'effect-resolution', treatedAs)
+      : null
     setComboHistory(prev => [...prev, snapshotComboState()])
     setZones(prev => {
       const next = Object.fromEntries(ZONE_KEYS.map(zone => [zone, [...prev[zone]]]))
@@ -898,6 +928,9 @@ export default function App() {
     setActiveEffect(null)
     setActiveZoneContext(destinationZone)
     setActiveCardTurn(currentTurn)
+    if (destinationZone === 'monsterZone') {
+      promptOnSummonEffects(card, destinationEntry)
+    }
     await fetchCardExtras(card)
   }
 
@@ -1019,10 +1052,11 @@ export default function App() {
     closeEffectPicker()
 
     let resolvedZone = zone
+    let summonedEntry = null
     if (entry
         && zone === 'spellTrapZone'
         && /special summon this card/i.test(effect.text)) {
-      const summonedEntry = {
+      summonedEntry = {
         ...entry,
         moveReason: 'special-summon',
         treatedAs: null,
@@ -1040,6 +1074,9 @@ export default function App() {
     }
 
     setActiveZoneContext(resolvedZone)
+    if (summonedEntry) {
+      promptOnSummonEffects(card, summonedEntry)
+    }
     const apiZone = ['graveyard', 'banished'].includes(zone) ? zone : null
     await fetchComboOptions(card, apiZone, effect.text)
   }
