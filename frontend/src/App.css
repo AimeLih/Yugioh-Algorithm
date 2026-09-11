@@ -794,6 +794,11 @@ body { background: #060a12; }
   background: linear-gradient(180deg, rgba(35, 92, 65, 0.14), rgba(13, 26, 44, 0.78));
 }
 
+.sim-zone.extraMonsterZone {
+  border-color: #3f7390;
+  background: linear-gradient(180deg, rgba(43, 104, 139, 0.16), rgba(13, 26, 44, 0.78));
+}
+
 .sim-zone.spellTrapZone {
   border-color: #5b4f86;
   background: linear-gradient(180deg, rgba(78, 59, 125, 0.15), rgba(13, 26, 44, 0.78));
@@ -844,7 +849,8 @@ body { background: #060a12; }
   gap: 0.45rem;
 }
 
-.extra-deck-summon-btn {
+.extra-deck-summon-btn,
+.pendulum-summon-btn {
   padding: 0.28rem 0.5rem;
   border: 1px solid #527a9f;
   border-radius: 5px;
@@ -858,9 +864,111 @@ body { background: #060a12; }
   cursor: pointer;
 }
 
-.extra-deck-summon-btn:hover {
+.extra-deck-summon-btn:hover,
+.pendulum-summon-btn:hover {
   border-color: #86bee8;
   background: #17344e;
+}
+
+.pendulum-summon-btn {
+  border-color: #438f82;
+  background: #12352f;
+  color: #b9eee3;
+}
+
+.pendulum-summon-picker {
+  width: min(720px, calc(100vw - 2rem));
+  max-height: min(760px, calc(100vh - 2rem));
+  overflow: hidden;
+  border: 1px solid #397d72;
+  border-radius: 12px;
+  background: #091523;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.65);
+}
+
+.pendulum-scale-summary,
+.pendulum-capacity-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 1rem;
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid #26384c;
+  color: #a9c8d9;
+  font-family: 'Rajdhani', sans-serif;
+}
+
+.pendulum-scale-summary strong {
+  color: #7cdbc7;
+}
+
+.pendulum-capacity-summary {
+  padding-block: 0.55rem;
+  color: #829bb0;
+  font-size: 0.78rem;
+}
+
+.pendulum-summon-options {
+  display: grid;
+  gap: 0.5rem;
+  max-height: 420px;
+  padding: 0.85rem 1rem;
+  overflow-y: auto;
+}
+
+.pendulum-summon-option {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid #294057;
+  border-radius: 7px;
+  background: #0d1c2c;
+  color: #d6e2ed;
+  cursor: pointer;
+}
+
+.pendulum-summon-option.selected {
+  border-color: #4aa994;
+  background: rgba(40, 126, 106, 0.2);
+}
+
+.pendulum-summon-option input {
+  accent-color: #45ad96;
+}
+
+.pendulum-summon-option span,
+.pendulum-summon-option small {
+  display: block;
+}
+
+.pendulum-summon-option small {
+  margin-top: 0.2rem;
+  color: #82a1b8;
+}
+
+.pendulum-summon-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.8rem 1rem;
+  border-top: 1px solid #26384c;
+  color: #91a9bb;
+  font-family: 'Rajdhani', sans-serif;
+}
+
+.pendulum-summon-confirm {
+  padding: 0.55rem 0.85rem;
+  border: 1px solid #4aa994;
+  border-radius: 6px;
+  background: #1d6c5a;
+  color: #edfff9;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.pendulum-summon-confirm:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
 }
 
 .sim-zone-cards {
