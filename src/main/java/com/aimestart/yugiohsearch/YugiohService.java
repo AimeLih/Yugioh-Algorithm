@@ -974,7 +974,7 @@ public class YugiohService {
             String sourceZoneOverride,
             boolean selectedEffectOnly
     ) {
-        List<Card> candidates = getRelatedArchetypeCards(card);
+        List<Card> candidates = getTextDrivenCandidates(card, description);
         if (candidates.isEmpty()) {
             return;
         }
@@ -987,6 +987,30 @@ public class YugiohService {
         for (EffectSection section : sections) {
             buildTextDrivenRoutesForSection(card, section, candidates, drafts);
         }
+    }
+
+    private List<Card> getTextDrivenCandidates(Card source, String effectText) {
+        LinkedHashMap<String, Card> candidates = new LinkedHashMap<>();
+        for (Card card : getRelatedArchetypeCards(source)) {
+            candidates.put(safeLower(card.getName()), card);
+        }
+
+        if (containsAny(effectText, "search", "add to your hand", "add 1")) {
+            for (String quotedTerm : extractQuotedTerms(effectText)) {
+                if (quotedTerm.isBlank() || safeLower(quotedTerm).equals(safeLower(source.getName()))) {
+                    continue;
+                }
+                for (Card card : cardRepository.findByNameContainingIgnoreCase(quotedTerm)) {
+                    candidates.putIfAbsent(safeLower(card.getName()), card);
+                }
+                for (Card card : cardRepository.findByTypeContainingIgnoreCaseAndDescriptionContainingIgnoreCase("", quotedTerm)) {
+                    candidates.putIfAbsent(safeLower(card.getName()), card);
+                }
+            }
+        }
+
+        candidates.values().removeIf(card -> Objects.equals(card.getId(), source.getId()));
+        return new ArrayList<>(candidates.values());
     }
 
     private void buildTextDrivenRoutesForSection(
@@ -1144,6 +1168,13 @@ public class YugiohService {
         }
         if (sourceText.contains("trap card from your deck") || sourceText.contains("trap from your deck")) {
             return type.contains("trap");
+        }
+        Matcher quotedFamily = Pattern.compile("\"([^\"]+)\"\\s+card").matcher(sourceText);
+        if (quotedFamily.find()) {
+            String family = safeLower(quotedFamily.group(1));
+            return safeLower(candidate.getName()).contains(family)
+                    || safeLower(candidate.getArchetype()).contains(family)
+                    || safeLower(candidate.getDescription()).contains(family);
         }
         return true;
     }
