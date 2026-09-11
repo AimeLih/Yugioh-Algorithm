@@ -10,7 +10,7 @@ Access the deployed project at [**yugioh-combo.vercel.app**](https://yugioh-comb
 
 > **Cold-start notice:** If the backend has been inactive, the first request may take longer while the service starts. Refresh or retry the search after it becomes available.
 
-You can also view the repository's latest development history on the [GitHub Activity page](https://github.com/AimeLih/Yugioh-Search/activity).
+You can also view the repository's latest development history on the [GitHub Activity page](https://github.com/AimeLih/Yugioh-Combo/activity).
 
 ## Features
 
