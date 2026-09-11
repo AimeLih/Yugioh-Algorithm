@@ -35,6 +35,92 @@ function Badge({ label, color }) {
   return <span className="badge" style={{ background: color }}>{label}</span>
 }
 
+const ZONE_KEYS = ['monsterZone', 'spellTrapZone', 'graveyard', 'banished', 'extraDeck']
+
+function emptyZones() {
+  return { monsterZone: [], spellTrapZone: [], graveyard: [], banished: [], extraDeck: [] }
+}
+
+function initialZoneForCard(card) {
+  return /(spell|trap)/i.test(card.type || '') ? 'spellTrapZone' : 'monsterZone'
+}
+
+function displayZoneName(zone) {
+  return {
+    monsterZone: 'Monster Zone',
+    spellTrapZone: 'Spell & Trap Zone',
+    graveyard: 'Graveyard',
+    banished: 'Banished',
+    extraDeck: 'Face-up Extra Deck',
+  }[zone] || 'Current location'
+}
+
+function normalizeEffectText(text) {
+  return (text || '')
+      .replace(/[“”]/g, '"')
+      .replace(/’/g, "'")
+      .replace(/\r\n/g, '\n')
+      .trim()
+}
+
+function effectSourceZone(text, card, fallbackZone) {
+  const lower = text.toLowerCase()
+  if (/continuous (?:trap|spell)/.test(lower) && /if this card is/.test(lower)) {
+    return 'Spell & Trap Zone'
+  }
+  if (/(?:in|from|sent to|while .* in) (?:the |your )?(?:gy|graveyard)/.test(lower)) {
+    return 'Graveyard'
+  }
+  if (/(?:this card|it) is banished|from your banished|among your banished/.test(lower)) {
+    return 'Banished'
+  }
+  if (fallbackZone) return fallbackZone
+  return /(spell|trap)/i.test(card.type || '') ? 'Spell & Trap Zone' : 'Monster Zone / Hand'
+}
+
+function cardEffectOptions(card, zone = null, entry = null) {
+  const normalized = normalizeEffectText(card.description)
+  let sections = [{ text: normalized, sourceZone: null }]
+  const pendulumMatch = normalized.match(
+      /\[?\s*pendulum effect\s*\]?\s*([\s\S]*?)\[?\s*monster effect\s*\]?\s*([\s\S]*)/i,
+  )
+  if (pendulumMatch) {
+    sections = [
+      { text: pendulumMatch[1], sourceZone: 'Pendulum Zone' },
+      { text: pendulumMatch[2], sourceZone: 'Monster Zone / Hand' },
+    ]
+  }
+
+  const options = sections.flatMap(section => section.text
+      .split(/(?<=[.!?])\s+(?=[A-Z"[])|\n+/)
+      .map(text => text.trim())
+      .filter(text => text.length > 0)
+      .filter(text => !/^you can only (?:use|activate)\b/i.test(text))
+      .filter(text => /\b(you can|add|draw|summon|place|set|send|discard|tribute|banish|destroy|return|target|activate)\b/i.test(text))
+      .map(text => ({
+        text,
+        sourceZone: effectSourceZone(text, card, section.sourceZone),
+      })))
+
+  return options.filter(effect => {
+    const source = effect.sourceZone.toLowerCase()
+    if (zone === 'graveyard') return source === 'graveyard'
+    if (zone === 'banished') return source === 'banished'
+    if (zone === 'monsterZone') return source.includes('monster zone') || source.includes('hand')
+    if (zone === 'spellTrapZone') {
+      return source.includes('spell & trap zone')
+          || source.includes('pendulum zone')
+          || (/(spell|trap)/i.test(card.type || '') && !source.includes('graveyard') && !source.includes('banished'))
+          || Boolean(entry?.treatedAs && source.includes('spell & trap zone'))
+    }
+    return true
+  })
+}
+
+function effectUsageKey(entry, effect) {
+  return `${entry?.instanceId ?? entry?.card?.id ?? 'card'}:${effect.text.toLowerCase()}`
+}
+
 function canActivateFromZone(entry, zone) {
   const text = (entry.card.description || '').toLowerCase()
   const reason = entry.moveReason || ''
@@ -60,12 +146,13 @@ function canActivateFromZone(entry, zone) {
     return /(?:if|when|while) (?:this card|it) is banished/.test(text)
         || /(?:from|among) your banished/.test(text)
   }
-  return false
+  return cardEffectOptions(entry.card, zone, entry).length > 0
 }
 
-function SimulatedZones({ zones, activatedZoneEffects, onActivateZoneCard }) {
+function SimulatedZones({ zones, activatedEffects, onRequestEffect }) {
   const zoneDefinitions = [
-    { key: 'field', label: 'Field' },
+    { key: 'monsterZone', label: 'Monsters' },
+    { key: 'spellTrapZone', label: 'Spells & Traps' },
     { key: 'graveyard', label: 'Graveyard' },
     { key: 'banished', label: 'Banished' },
     { key: 'extraDeck', label: 'Face-up Extra Deck' },
@@ -83,14 +170,16 @@ function SimulatedZones({ zones, activatedZoneEffects, onActivateZoneCard }) {
                 {zones[zone.key].length === 0 ? (
                     <div className="sim-zone-empty">No cards</div>
                 ) : zones[zone.key].map(entry => {
+                  const effects = cardEffectOptions(entry.card, zone.key, entry)
                   const liveEffect = canActivateFromZone(entry, zone.key)
-                  const used = activatedZoneEffects.includes(entry.instanceId)
+                  const used = effects.length > 0 && effects.every(effect =>
+                    activatedEffects.includes(effectUsageKey(entry, effect)))
                   return (
                       <button
                           key={entry.instanceId}
                           type="button"
                           className={`sim-zone-card${liveEffect ? ' live' : ''}${used ? ' used' : ''}`}
-                          onClick={() => liveEffect && !used && onActivateZoneCard(entry, zone.key)}
+                          onClick={() => liveEffect && !used && onRequestEffect(entry, zone.key)}
                           disabled={!liveEffect || used}
                           title={liveEffect
                             ? used
@@ -99,6 +188,9 @@ function SimulatedZones({ zones, activatedZoneEffects, onActivateZoneCard }) {
                             : 'This card has no effect that activates from this zone'}
                       >
                         <span className="sim-zone-card-name">{entry.card.name}</span>
+                        {entry.treatedAs && (
+                            <span className="sim-zone-treated-as">Treated as {entry.treatedAs}</span>
+                        )}
                         {liveEffect && (
                             <span className="sim-zone-effect-state">
                               {used ? 'Effect used' : 'Effect available'}
@@ -110,6 +202,44 @@ function SimulatedZones({ zones, activatedZoneEffects, onActivateZoneCard }) {
               </div>
             </section>
         ))}
+      </div>
+  )
+}
+
+function EffectPicker({ selection, activatedEffects, onChoose, onCancel }) {
+  if (!selection) return null
+
+  return (
+      <div className="material-picker-backdrop" role="presentation">
+        <section className="effect-picker" role="dialog" aria-modal="true" aria-labelledby="effect-picker-title">
+          <div className="material-picker-header">
+            <div>
+              <div className="material-picker-kicker">Activate Card Effect</div>
+              <h3 id="effect-picker-title">{selection.card.name}</h3>
+            </div>
+            <button type="button" className="material-picker-close" onClick={onCancel}>Close</button>
+          </div>
+          <div className="effect-picker-copy">Choose the exact effect you want to activate.</div>
+          <div className="effect-picker-options">
+            {selection.effects.map((effect, index) => {
+              const used = activatedEffects.includes(effectUsageKey(selection.entry, effect))
+              return (
+                  <button
+                      key={`${effect.sourceZone}-${effect.text}`}
+                      type="button"
+                      className="effect-choice"
+                      onClick={() => onChoose(effect, index)}
+                      disabled={used}
+                  >
+                    <span className="effect-choice-number">Effect {index + 1}</span>
+                    <span className="effect-choice-zone">From: {effect.sourceZone}</span>
+                    <span className="effect-choice-text">{effect.text}</span>
+                    {used && <span className="effect-choice-used">Already activated</span>}
+                  </button>
+              )
+            })}
+          </div>
+        </section>
       </div>
   )
 }
@@ -136,11 +266,20 @@ function MaterialPicker({
   const availableFrom = (materialPlan?.availableFrom || '').toLowerCase()
   const hasOpenCardPool = availableFrom.includes('hand')
       || (availableFrom.includes('deck') && !availableFrom.includes('extra deck'))
+  const isTributePlan = (materialPlan?.action || '').toLowerCase().includes('tribute')
 
   function simulatedLocations(card) {
-    return ['field', 'graveyard', 'banished', 'extraDeck'].filter(zone =>
-      availableFrom.includes(zone === 'extraDeck' ? 'extra deck' : zone)
-        && zones[zone].some(entry => entry.card.id === card.id))
+    return ZONE_KEYS.filter(zone => {
+      const availableToken = zone === 'extraDeck'
+        ? 'extra deck'
+        : zone === 'monsterZone'
+          ? 'field'
+          : zone === 'spellTrapZone'
+            ? 'field'
+            : zone
+      return availableFrom.includes(availableToken)
+        && zones[zone].some(entry => entry.card.id === card.id)
+    })
   }
 
   function availableCopies(card) {
@@ -192,9 +331,11 @@ function MaterialPicker({
                 <div className="material-slots">
                   {materialPlan.slots.map((slot, slotIndex) => {
                     const selectedCards = selections[slotIndex] ?? []
-                    const matchingCards = slot.eligibleCards.filter(card =>
+                    const filteredCards = slot.eligibleCards.filter(card =>
                       card.name.toLowerCase().includes(search.toLowerCase())
                         && availableCopies(card) > 0)
+                    const matchingCards = isTributePlan ? filteredCards.slice(0, 50) : filteredCards
+                    const hiddenResultCount = filteredCards.length - matchingCards.length
                     return (
                         <section key={`${slot.requirement}-${slotIndex}`} className="material-slot">
                           <div className="material-slot-heading">
@@ -215,6 +356,11 @@ function MaterialPicker({
                               </div>
                           )}
                           <div className="material-card-list">
+                            {hiddenResultCount > 0 && (
+                                <div className="material-result-cap">
+                                  Showing the first 50 of {filteredCards.length} tribute options. Use the search bar to find a specific card.
+                                </div>
+                            )}
                             {matchingCards.length === 0 ? (
                                 <div className="material-no-results">No legal cards match this filter.</div>
                             ) : matchingCards.map(card => (
@@ -227,9 +373,9 @@ function MaterialPicker({
                                       || selectedCopies(card) >= availableCopies(card)}
                                 >
                                   <span>{card.name}</span>
-                                  <span>
-                                    {simulatedLocations(card).length > 0
-                                      ? `In ${simulatedLocations(card).join(' / ')}`
+                                    <span>
+                                      {simulatedLocations(card).length > 0
+                                      ? `In ${simulatedLocations(card).map(displayZoneName).join(' / ')}`
                                       : materialPlan.availableFrom}
                                   </span>
                                 </button>
@@ -307,8 +453,9 @@ function CardDetail({
   onChooseCard,
   onBackCombo,
   zones,
-  activatedZoneEffects,
-  onActivateZoneCard,
+  activatedEffects,
+  onRequestEffect,
+  activeEffect,
   currentTurn,
   phase,
   activeCardTurn,
@@ -328,11 +475,8 @@ function CardDetail({
     const timing = option.timing || ''
     const destination = (option.destination || '').toLowerCase()
     const targetType = (option.card.type || '').toLowerCase()
-    const mainMonsterCount = zones.field.filter(entry =>
-      (entry.card.type || '').toLowerCase().includes('monster')
-        && !/(fusion|synchro|xyz|link)/.test((entry.card.type || '').toLowerCase())).length
-    const spellTrapCount = zones.field.filter(entry =>
-      /(spell|trap)/.test((entry.card.type || '').toLowerCase())).length
+    const mainMonsterCount = zones.monsterZone.length
+    const spellTrapCount = zones.spellTrapZone.length
 
     if (destination.includes('monster zone')
         && targetType.includes('monster')
@@ -427,7 +571,7 @@ function CardDetail({
             </div>
 
             <div className="wiki-section-header" style={{ background: color }}>
-              Card Text
+              Description
             </div>
             <div className="wiki-card-text">{card.description}</div>
 
@@ -466,8 +610,28 @@ function CardDetail({
                 </button>
               </div>
 
+              <div className="effect-action-bar">
+                <button type="button" className="activate-effect-btn" onClick={() => onRequestEffect()}>
+                  {activeEffect ? 'Choose Another Effect' : 'Activate an Effect'}
+                </button>
+                {activeEffect ? (
+                    <div className="active-effect-summary">
+                      <span>Resolving from {activeEffect.sourceZone}</span>
+                      <p>{activeEffect.text}</p>
+                    </div>
+                ) : (
+                    <div className="effect-action-hint">
+                      Select an effect before choosing the next card in the combo.
+                    </div>
+                )}
+              </div>
+
               {comboLoading ? (
                   <div className="wiki-combo-loading">Loading next combo options...</div>
+              ) : !activeEffect ? (
+                  <div className="wiki-combo-empty">
+                    No effect is active. Choose which effect you want to use.
+                  </div>
               ) : comboOptions && comboOptions.length > 0 ? (
                   <div className="combo-option-groups">
                     {continuingOptions.length > 0 && (
@@ -505,18 +669,18 @@ function CardDetail({
                   </div>
               ) : (
                   <div className="wiki-combo-empty">
-                    This combo can end here. Go back to explore another branch.
+                    This effect resolves without a selectable follow-up card.
                   </div>
               )}
             </div>
 
             <div className="wiki-section-header zone-section-header">
-              Simulated Zones
+              Current Field &amp; Other Zones
             </div>
             <SimulatedZones
                 zones={zones}
-                activatedZoneEffects={activatedZoneEffects}
-                onActivateZoneCard={onActivateZoneCard}
+                activatedEffects={activatedEffects}
+                onRequestEffect={onRequestEffect}
             />
           </div>
         </div>
@@ -551,10 +715,13 @@ export default function App() {
   const [extender, setExtender] = useState(null)
   const [comboPath, setComboPath] = useState([])
   const [comboOptions, setComboOptions] = useState([])
-  const [zones, setZones] = useState({ field: [], graveyard: [], banished: [], extraDeck: [] })
+  const [zones, setZones] = useState(emptyZones)
   const [comboHistory, setComboHistory] = useState([])
-  const [activatedZoneEffects, setActivatedZoneEffects] = useState([])
+  const [activatedEffects, setActivatedEffects] = useState([])
   const [activeZoneContext, setActiveZoneContext] = useState(null)
+  const [selectedEntry, setSelectedEntry] = useState(null)
+  const [activeEffect, setActiveEffect] = useState(null)
+  const [effectSelection, setEffectSelection] = useState(null)
   const [currentTurn, setCurrentTurn] = useState(1)
   const [phase, setPhase] = useState('Main Phase')
   const [activeCardTurn, setActiveCardTurn] = useState(1)
@@ -568,16 +735,20 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
-  function zoneEntry(card, moveReason = 'placed') {
-    return { instanceId: `zone-${++zoneInstanceId.current}`, card, moveReason }
+  function zoneEntry(card, moveReason = 'placed', treatedAs = null) {
+    return { instanceId: `zone-${++zoneInstanceId.current}`, card, moveReason, treatedAs }
   }
 
   function snapshotComboState() {
     return {
       comboPath,
+      comboOptions,
       zones,
-      activatedZoneEffects,
+      activatedEffects,
       activeZoneContext,
+      selected,
+      selectedEntry,
+      activeEffect,
       currentTurn,
       phase,
       activeCardTurn,
@@ -602,13 +773,16 @@ export default function App() {
     }
   }
 
-  async function fetchComboOptions(card, zoneContext = null) {
+  async function fetchComboOptions(card, zoneContext = null, effect = null) {
     const requestId = ++comboRequestId.current
     setComboLoading(true)
     setComboOptions([])
     try {
       const zoneQuery = zoneContext ? `&zone=${encodeURIComponent(zoneContext)}` : ''
-      const res = await fetch(`${API}/yugioh/card/combos?name=${encodeURIComponent(card.name)}${zoneQuery}`)
+      const effectQuery = effect ? `&effect=${encodeURIComponent(effect)}` : ''
+      const res = await fetch(
+          `${API}/yugioh/card/combos?name=${encodeURIComponent(card.name)}${zoneQuery}${effectQuery}`,
+      )
       if (!res.ok) throw new Error('Failed to load combo options')
       const data = await res.json()
       if (comboRequestId.current === requestId) {
@@ -626,18 +800,23 @@ export default function App() {
   }
 
   async function openRootCard(card) {
+    const rootEntry = zoneEntry(card)
+    const rootZone = initialZoneForCard(card)
     setSelected(card)
+    setSelectedEntry(rootEntry)
     setComboPath([card])
-    setZones({ field: [zoneEntry(card)], graveyard: [], banished: [], extraDeck: [] })
+    setComboOptions([])
+    setZones({ ...emptyZones(), [rootZone]: [rootEntry] })
     setComboHistory([])
-    setActivatedZoneEffects([])
-    setActiveZoneContext(null)
+    setActivatedEffects([])
+    setActiveZoneContext(rootZone)
+    setActiveEffect(null)
+    setEffectSelection(null)
     setCurrentTurn(1)
     setPhase('Main Phase')
     setActiveCardTurn(1)
     closeMaterialPicker()
     await fetchCardExtras(card)
-    await fetchComboOptions(card)
   }
 
   async function finishComboChoice(
@@ -647,18 +826,27 @@ export default function App() {
       paymentReason = 'send',
   ) {
     const card = option.card
+    const destination = (option.destination || '').toLowerCase()
+    const destinationZone = destination.includes('spell & trap zone') || destination.includes('pendulum zone')
+      ? 'spellTrapZone'
+      : destination.includes('monster zone')
+        ? 'monsterZone'
+        : null
+    const treatedAs = destination.includes('continuous trap')
+      ? 'Continuous Trap'
+      : destination.includes('continuous spell')
+        ? 'Continuous Spell'
+        : destination.includes('pendulum zone')
+          ? 'Pendulum Card'
+          : null
+    const destinationEntry = destinationZone ? zoneEntry(card, 'effect-resolution', treatedAs) : null
     setComboHistory(prev => [...prev, snapshotComboState()])
     setZones(prev => {
-      const next = {
-        field: [...prev.field],
-        graveyard: [...prev.graveyard],
-        banished: [...prev.banished],
-        extraDeck: [...prev.extraDeck],
-      }
+      const next = Object.fromEntries(ZONE_KEYS.map(zone => [zone, [...prev[zone]]]))
 
       for (const material of paidMaterials) {
         let originZone = null
-        for (const zoneName of ['field', 'graveyard', 'banished', 'extraDeck']) {
+        for (const zoneName of ZONE_KEYS) {
           const existingIndex = next[zoneName].findIndex(entry => entry.card.id === material.id)
           if (existingIndex >= 0) {
             next[zoneName].splice(existingIndex, 1)
@@ -672,7 +860,7 @@ export default function App() {
           if (isToken) {
             continue
           }
-          const isFieldPendulum = originZone === 'field'
+          const isFieldPendulum = ['monsterZone', 'spellTrapZone'].includes(originZone)
               && (material.type || '').toLowerCase().includes('pendulum')
           if (isFieldPendulum) {
             next.extraDeck.push(zoneEntry(material, 'pendulum-replacement'))
@@ -684,18 +872,33 @@ export default function App() {
         }
       }
 
-      const destination = (option.destination || '').toLowerCase()
-      if (destination.includes('monster zone') || destination.includes('pendulum zone')) {
-        next.field.push(zoneEntry(card))
+      const effectText = (activeEffect?.text || '').toLowerCase()
+      if (selectedEntry
+          && effectText.includes('place this card')
+          && /continuous (?:trap|spell)/.test(effectText)) {
+        for (const zoneName of ZONE_KEYS) {
+          next[zoneName] = next[zoneName].filter(entry => entry.instanceId !== selectedEntry.instanceId)
+        }
+        next.spellTrapZone.push({
+          ...selectedEntry,
+          moveReason: 'placed-as-continuous',
+          treatedAs: effectText.includes('continuous spell') ? 'Continuous Spell' : 'Continuous Trap',
+        })
+      }
+
+      if (destinationEntry) {
+        next[destinationZone].push(destinationEntry)
       }
       return next
     })
     setSelected(card)
+    setSelectedEntry(destinationEntry)
     setComboPath(prev => [...prev, card])
-    setActiveZoneContext(null)
+    setComboOptions([])
+    setActiveEffect(null)
+    setActiveZoneContext(destinationZone)
     setActiveCardTurn(currentTurn)
     await fetchCardExtras(card)
-    await fetchComboOptions(card)
   }
 
   async function chooseComboOption(option) {
@@ -714,8 +917,11 @@ export default function App() {
     setMaterialLoading(true)
     try {
       const plannerPath = isPaidFusion ? 'fusion-materials' : 'cost-materials'
+      const effectQuery = activeEffect?.text
+        ? `&effect=${encodeURIComponent(activeEffect.text)}`
+        : ''
       const response = await fetch(
-          `${API}/yugioh/card/${plannerPath}?source=${encodeURIComponent(selected.name)}&target=${encodeURIComponent(option.card.name)}`,
+          `${API}/yugioh/card/${plannerPath}?source=${encodeURIComponent(selected.name)}&target=${encodeURIComponent(option.card.name)}${effectQuery}`,
       )
       if (!response.ok) throw new Error('Could not determine legal cards for this route cost.')
       setMaterialPlan(await response.json())
@@ -778,33 +984,84 @@ export default function App() {
     await finishComboChoice(option, materials, destination, paymentReason)
   }
 
-  async function activateZoneCard(entry, zone) {
-    setComboHistory(prev => [...prev, snapshotComboState()])
-    setActivatedZoneEffects(prev => [...prev, entry.instanceId])
+  async function requestEffectActivation(entry = selectedEntry, zone = activeZoneContext) {
+    const card = entry?.card ?? selected
+    if (!card) return
+    const resolvedEntry = entry ?? { instanceId: `card-${card.id ?? card.name}`, card, moveReason: 'selected' }
+    const effects = cardEffectOptions(card, zone, resolvedEntry)
+    if (effects.length === 0) {
+      setError(`${card.name} has no effect that can be activated from ${displayZoneName(zone)}.`)
+      return
+    }
+    setError(null)
+    setSelected(card)
+    setSelectedEntry(resolvedEntry)
     setActiveZoneContext(zone)
+    setEffectSelection({ card, entry: resolvedEntry, zone, effects })
+    await fetchCardExtras(card)
+  }
+
+  function closeEffectPicker() {
+    setEffectSelection(null)
+  }
+
+  async function chooseEffect(effect) {
+    if (!effectSelection) return
+    const { card, entry, zone } = effectSelection
+    setComboHistory(prev => [...prev, snapshotComboState()])
+    setActivatedEffects(prev => [...prev, effectUsageKey(entry, effect)])
+    setActiveEffect(effect)
+    setComboOptions([])
     setActiveCardTurn(currentTurn)
-    setSelected(entry.card)
-    setComboPath(prev => [...prev, entry.card])
-    await fetchCardExtras(entry.card)
-    await fetchComboOptions(entry.card, zone)
+    setSelected(card)
+    setSelectedEntry(entry)
+    setComboPath(prev => prev.at(-1)?.id === card.id ? prev : [...prev, card])
+    closeEffectPicker()
+
+    let resolvedZone = zone
+    if (entry
+        && zone === 'spellTrapZone'
+        && /special summon this card/i.test(effect.text)) {
+      const summonedEntry = {
+        ...entry,
+        moveReason: 'special-summon',
+        treatedAs: null,
+      }
+      setZones(prev => {
+        const next = Object.fromEntries(ZONE_KEYS.map(zoneName => [
+          zoneName,
+          prev[zoneName].filter(candidate => candidate.instanceId !== entry.instanceId),
+        ]))
+        next.monsterZone.push(summonedEntry)
+        return next
+      })
+      resolvedZone = 'monsterZone'
+      setSelectedEntry(summonedEntry)
+    }
+
+    setActiveZoneContext(resolvedZone)
+    const apiZone = ['graveyard', 'banished'].includes(zone) ? zone : null
+    await fetchComboOptions(card, apiZone, effect.text)
   }
 
   async function goBackCombo() {
     if (comboHistory.length === 0) return
     const previousState = comboHistory[comboHistory.length - 1]
-    const previousCard = previousState.comboPath[previousState.comboPath.length - 1]
     setComboHistory(prev => prev.slice(0, -1))
     setComboPath(previousState.comboPath)
+    setComboOptions(previousState.comboOptions)
     setZones(previousState.zones)
-    setActivatedZoneEffects(previousState.activatedZoneEffects)
+    setActivatedEffects(previousState.activatedEffects)
     setActiveZoneContext(previousState.activeZoneContext)
+    setSelected(previousState.selected)
+    setSelectedEntry(previousState.selectedEntry)
+    setActiveEffect(previousState.activeEffect)
     setCurrentTurn(previousState.currentTurn)
     setPhase(previousState.phase)
     setActiveCardTurn(previousState.activeCardTurn)
-    setSelected(previousCard)
+    closeEffectPicker()
     closeMaterialPicker()
-    await fetchCardExtras(previousCard)
-    await fetchComboOptions(previousCard, previousState.activeZoneContext)
+    await fetchCardExtras(previousState.selected)
   }
 
   async function handleSearch(e) {
@@ -819,10 +1076,13 @@ export default function App() {
     setComboPath([])
     setComboOptions([])
     setComboLoading(false)
-    setZones({ field: [], graveyard: [], banished: [], extraDeck: [] })
+    setZones(emptyZones())
     setComboHistory([])
-    setActivatedZoneEffects([])
+    setActivatedEffects([])
     setActiveZoneContext(null)
+    setSelectedEntry(null)
+    setActiveEffect(null)
+    setEffectSelection(null)
     setCurrentTurn(1)
     setPhase('Main Phase')
     setActiveCardTurn(1)
@@ -940,8 +1200,9 @@ export default function App() {
                           onChooseCard={chooseComboOption}
                           onBackCombo={goBackCombo}
                           zones={zones}
-                          activatedZoneEffects={activatedZoneEffects}
-                          onActivateZoneCard={activateZoneCard}
+                          activatedEffects={activatedEffects}
+                          onRequestEffect={requestEffectActivation}
+                          activeEffect={activeEffect}
                           currentTurn={currentTurn}
                           phase={phase}
                           activeCardTurn={activeCardTurn}
@@ -970,6 +1231,12 @@ export default function App() {
             onConfirm={confirmMaterialPayment}
             onCancel={closeMaterialPicker}
             zones={zones}
+        />
+        <EffectPicker
+            selection={effectSelection}
+            activatedEffects={activatedEffects}
+            onChoose={chooseEffect}
+            onCancel={closeEffectPicker}
         />
       </div>
   )
